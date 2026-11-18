@@ -1,0 +1,49 @@
+name: Documentation
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    paths:
+      - "docs/**"
+      - "overrides/**"
+      - "zensical.toml"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build the site
+        run: |
+          python -m pip install --upgrade pip zensical
+          zensical build --clean
+
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name == 'push'
+        with:
+          path: site
+
+  deploy:
+    # Needs GitHub Pages enabled with "Source: GitHub Actions" in the repository settings
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ya-onelogin-aws-assume-role"
+dynamic = ["version"]
+description = "Yet another onelogin-aws-assume-role: an unofficial fork that assumes AWS roles with OneLogin"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "OneLogin", email = "support@onelogin.com" }]
+keywords = ["onelogin", "aws-assume-role"]
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "boto3>=1.7.84",
+    "requests>=2.20.0",
+    "pyyaml>=5.1.2",
+    "lxml",
+    "keyring>=23.0.0",
+    "questionary>=2.0.1",
+]
+
+[project.optional-dependencies]
+dev = ["ruff"]
+docs = ["zensical"]
+
+[project.urls]
+Homepage = "https://github.com/oec-tech/ya-onelogin-aws-assume-role"
+Documentation = "https://oec-tech.github.io/ya-onelogin-aws-assume-role/"
+Upstream = "https://github.com/onelogin/onelogin-python-aws-assume-role"
+
+[project.scripts]
+ya-onelogin-aws-assume-role = "aws_assume_role.aws_assume_role:main"
+olaar = "aws_assume_role.aws_assume_role:main"
+# The original command name, so existing scripts and AWS profiles keep working
+onelogin-aws-assume-role = "aws_assume_role.aws_assume_role:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+packages = ["aws_assume_role"]
+
+[tool.setuptools.package-data]
+# Optional files dropped into the package folder before building
+aws_assume_role = ["accounts.yaml", "onelogin.sdk.json"]
+
+[tool.setuptools.dynamic]
+version = { attr = "aws_assume_role.version.__version__" }
+
+[tool.ruff]
+target-version = "py310"
+line-length = 160
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]

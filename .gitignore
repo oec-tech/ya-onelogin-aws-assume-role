@@ -26,3 +26,7 @@ virtualenv
 onelogin.sdk.json
 onelogin.aws.json
 accounts.yaml
+
+# Zensical build output
+site/
+.cache/

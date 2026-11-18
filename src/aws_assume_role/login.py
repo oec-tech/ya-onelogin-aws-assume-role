@@ -10,15 +10,20 @@ import time
 
 try:
     from aws_assume_role.onelogin_client import OneLoginClient
-    from aws_assume_role.prompts import read_line, get_yes_or_not, get_selection
+    from aws_assume_role.prompts import read_line, get_yes_or_not, select_option
+    from aws_assume_role.last_choices import get_last_choice, save_last_choice, index_of
 except ImportError:
     from onelogin_client import OneLoginClient
-    from prompts import read_line, get_yes_or_not, get_selection
+    from prompts import read_line, get_yes_or_not, select_option
+    from last_choices import get_last_choice, save_last_choice, index_of
 
 
 MFA_ATTEMPTS_FOR_WARNING = 3
 TIME_SLEEP_ON_RESPONSE_PENDING = 15
 MAX_ITER_GET_SAML_RESPONSE = 6
+DEFAULT_MFA_POLL_INTERVAL = 3
+MAX_MFA_POLL_INTERVAL = 30
+PUSH_TIMEOUT = 90
 
 
 def get_client(options):
@@ -26,7 +31,7 @@ def get_client(options):
     region = 'us'
     client_file_name = 'onelogin.sdk.json'
 
-    if options.client_id is not None and options.client_secret is not None:
+    if options.client_id and options.client_secret:
         client_id = options.client_id
         client_secret = options.client_secret
         region = options.region
@@ -60,6 +65,49 @@ def get_client(options):
     return client
 
 
+def device_label(device):
+    label = device.auth_factor_name or device.type
+    if device.display_name:
+        label += " (%s)" % device.display_name
+    return label
+
+
+def find_device(devices, name):
+    """
+    Returns the index of the MFA device that --mfa-device names: its id, type
+    or label, ignoring case, or else the first device whose label contains it.
+    """
+    wanted = name.strip().lower()
+    for index, device in enumerate(devices):
+        names = (str(device.id), device.auth_factor_name, device.type, device.display_name, device_label(device))
+        if wanted in [str(n).lower() for n in names if n]:
+            return index
+    for index, device in enumerate(devices):
+        if wanted in device_label(device).lower():
+            return index
+    return None
+
+
+def wait_for_push(client, app_id, device_id, state_token, response, poll_interval):
+    """
+    Checks every poll_interval seconds whether the push notification was
+    approved, for up to PUSH_TIMEOUT seconds, backing off while OneLogin
+    rate-limits the checks. Returns the last response.
+    """
+    interval = poll_interval
+    deadline = time.monotonic() + PUSH_TIMEOUT
+    while time.monotonic() < deadline:
+        if response is not None and response.type != "pending":
+            break
+        if response is None:
+            if client.error != '429':
+                break
+            interval = min(interval * 2, MAX_MFA_POLL_INTERVAL)
+        time.sleep(interval)
+        response = client.get_saml_assertion_verifying(app_id, device_id, state_token, None, do_not_notify=True)
+    return response
+
+
 def check_device_exists(devices, device_id):
     for device in devices:
         if device.id == device_id:
@@ -67,7 +115,8 @@ def check_device_exists(devices, device_id):
     return False
 
 
-def get_saml_response(client, username_or_email, password, app_id, onelogin_subdomain, ip=None, mfa_verify_info=None, cmd_otp=None):
+def get_saml_response(client, username_or_email, password, app_id, onelogin_subdomain, ip=None, mfa_verify_info=None, cmd_otp=None,
+                      mfa_device=None, poll_interval=DEFAULT_MFA_POLL_INTERVAL):
     saml_endpoint_response = client.get_saml_assertion(username_or_email, password, app_id, onelogin_subdomain, ip)
 
     try_get_saml_response = 0
@@ -110,7 +159,7 @@ def get_saml_response(client, username_or_email, password, app_id, onelogin_subd
             print("Not able to get a SAMLResponse with success status after %s iteration(s)." % MAX_ITER_GET_SAML_RESPONSE)
             sys.exit()
 
-    if saml_endpoint_response and saml_endpoint_response.type == None:
+    if saml_endpoint_response and saml_endpoint_response.type is None:
         print("SAML assertion failed with message: ", saml_endpoint_response.message)
         sys.exit()
 
@@ -141,20 +190,20 @@ def get_saml_response(client, username_or_email, password, app_id, onelogin_subd
             # Consider case 0 or MFA that requires a trigger
             if mfa_verify_info is None or device_type in ["OneLogin SMS", "OneLogin Protect"]:
                 if mfa_verify_info is None:
-                    print("-----------------------------------------------------------------------")
-                    for index, device in enumerate(devices):
-                        label = device.auth_factor_name or device.type
-                        if device.display_name:
-                            label += " (%s)" % device.display_name
-                        print(" " + str(index) + " | " + label)
-
-                    print("-----------------------------------------------------------------------")
-
-                    if len(devices) > 1:
-                        print("\nSelect the desired MFA Device [0-%s]: " % (len(devices) - 1))
-                        device_selection = get_selection(len(devices))
+                    device_selection = find_device(devices, mfa_device) if mfa_device else None
+                    if device_selection is not None:
+                        print("Using MFA device: %s" % device_label(devices[device_selection]))
                     else:
-                        device_selection = 0
+                        if mfa_device:
+                            print("No MFA device matches '%s'." % mfa_device)
+                        device_ids = [str(device.id) for device in devices]
+                        last_device = get_last_choice(onelogin_subdomain, username_or_email, app_id, 'mfa_device')
+                        device_selection = select_option("Select the desired MFA Device",
+                                                         [device_label(device) for device in devices],
+                                                         index_of(device_ids, last_device))
+                        save_last_choice(onelogin_subdomain, username_or_email, app_id, 'mfa_device', device_ids[device_selection])
+                        if len(devices) == 1:
+                            print("Using MFA device: %s" % device_label(devices[0]))
                     device = devices[device_selection]
                     device_id = device.id
                     device_type = device.auth_factor_name or device.type
@@ -169,15 +218,12 @@ def get_saml_response(client, username_or_email, password, app_id, onelogin_subd
                     saml_endpoint_response = client.get_saml_assertion_verifying(app_id, device_id, state_token, None, do_not_notify=True)
                     print("SMS with OTP token sent to device %s" % device_id)
                 elif device_type == "OneLogin Protect":
-                    try_get_saml_response_verified = 0
                     # Trigger PUSH and try verify
                     if 'otp_token' not in mfa_verify_info:
                         saml_endpoint_response = client.get_saml_assertion_verifying(app_id, device_id, state_token, None, do_not_notify=False)
-                        print("PUSH with OTP token sent to device %s" % device_id)
-                    while saml_endpoint_response and saml_endpoint_response.type == "pending" and try_get_saml_response_verified < MAX_ITER_GET_SAML_RESPONSE:
-                        time.sleep(TIME_SLEEP_ON_RESPONSE_PENDING)
-                        saml_endpoint_response = client.get_saml_assertion_verifying(app_id, device_id, state_token, None, do_not_notify=True)
-                        try_get_saml_response_verified += 1
+                        print("PUSH with OTP token sent to device %s, waiting for approval..." % device_id)
+                    saml_endpoint_response = wait_for_push(client, app_id, device_id, state_token,
+                                                           saml_endpoint_response, poll_interval)
 
                     if saml_endpoint_response and saml_endpoint_response.type == 'success':
                         verified_with_push = True
@@ -208,7 +254,8 @@ def get_saml_response(client, username_or_email, password, app_id, onelogin_subd
                     if client.error_description == "State token is invalid or expired":
                         # State token expired so the OTP Token was not able to be processed
                         # regenerate new SAMLResponse and get new state_token
-                        return get_saml_response(client, username_or_email, password, app_id, onelogin_subdomain, ip, mfa_verify_info)
+                        return get_saml_response(client, username_or_email, password, app_id, onelogin_subdomain, ip, mfa_verify_info,
+                                                 mfa_device=mfa_device, poll_interval=poll_interval)
                     else:
                         if mfa_error > MFA_ATTEMPTS_FOR_WARNING and len(devices) > 1:
                             print("The OTP Token was not able to be processed after %s attempts, Do you want to select a new MFA method? (y/n)" % MFA_ATTEMPTS_FOR_WARNING)
@@ -216,7 +263,8 @@ def get_saml_response(client, username_or_email, password, app_id, onelogin_subd
                             if answer == 'y':
                                 # Let's regenerate the SAMLResponse and initialize again the count
                                 print("\n")
-                                return get_saml_response(client, username_or_email, password, app_id, onelogin_subdomain, ip, None)
+                                return get_saml_response(client, username_or_email, password, app_id, onelogin_subdomain, ip, None,
+                                                        poll_interval=poll_interval)
                             else:
                                 print("Ok, Try introduce a new OTP Token then: ")
                         else:

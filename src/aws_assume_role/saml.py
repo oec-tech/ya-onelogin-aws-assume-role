@@ -7,7 +7,7 @@ import base64
 import json
 import os
 
-from datetime import datetime
+from datetime import datetime, timezone
 from lxml import etree as ET
 
 
@@ -81,7 +81,13 @@ def write_data_to_cache(contents):
 
     if not os.path.exists(DEFAULT_AWS_DIR):
         os.makedirs(DEFAULT_AWS_DIR)
-    with open(SAML_CACHE_PATH, 'w') as f:
+    # The assertion can be exchanged for AWS credentials until it expires, so
+    # only the user may read it. O_CREAT's mode only applies to a new file, so
+    # an existing cache written by an older version is tightened too.
+    fd = os.open(SAML_CACHE_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        if hasattr(os, 'fchmod'):
+            os.fchmod(f.fileno(), 0o600)
         json.dump(contents, f)
 
 
@@ -92,6 +98,14 @@ def clean_cache():
     if os.path.exists(SAML_CACHE_PATH):
         os.remove(SAML_CACHE_PATH)
         print('Cache cleaned.')
+
+
+def parse_saml_time(value):
+    """
+    Parses a SAML xs:dateTime in UTC, with or without fractional seconds.
+    """
+    fmt = "%Y-%m-%dT%H:%M:%S.%fZ" if '.' in value else "%Y-%m-%dT%H:%M:%SZ"
+    return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
 
 
 def is_valid_saml_assertion(saml_xml):
@@ -112,12 +126,12 @@ def is_valid_saml_assertion(saml_xml):
             not_before_str = conditions[0].get('NotBefore')
             not_on_or_after_str = conditions[0].get('NotOnOrAfter')
 
-            now = datetime.utcnow()
-            not_before = datetime.strptime(not_before_str, "%Y-%m-%dT%H:%M:%SZ")
-            not_on_or_after = datetime.strptime(not_on_or_after_str, "%Y-%m-%dT%H:%M:%SZ")
+            now = datetime.now(timezone.utc)
+            not_before = parse_saml_time(not_before_str)
+            not_on_or_after = parse_saml_time(not_on_or_after_str)
 
             if not_before <= now < not_on_or_after:
                 return True
         return False
-    except Exception as e:
+    except Exception:
         return False

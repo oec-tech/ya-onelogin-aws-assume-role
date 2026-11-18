@@ -19,7 +19,7 @@ def get_account_aliases_info(config_file_path):
         accountsfile = open(os.path.expanduser('~') + '/.onelogin/' + 'accounts.yaml').read()
 
     if accountsfile is not None:
-        account_aliases = yaml.load(accountsfile, Loader=yaml.FullLoader)
+        account_aliases = yaml.safe_load(accountsfile)
     return account_aliases
 
 
@@ -33,51 +33,56 @@ def identify_known_accounts(account_aliases, account_id):
         if 'accounts' in account_aliases.keys():
             accounts = account_aliases["accounts"]
             for acct in accounts.keys():
-                if acct == account_id:
+                if str(acct) == account_id:
                     return accounts[acct]
         return "Unidentified"
     else:
         return ""
 
 
-def pretty_choices(index, role_name, account_id, account_aliases=[], mark=""):
+def format_choice(role_name, account_id, account_aliases=None, mark=""):
     """
-    Formats the output of the account option
-    :return: formatted print
+    Formats one account/role option of the role menu
     """
     account_alias = identify_known_accounts(account_aliases, account_id)
     if account_alias:
-        print(" %s | %s (Account: %s - %s)%s" % (index, role_name, account_id, account_alias, mark))
-    else:
-        print(" %s | %s (Account %s)%s" % (index, role_name, account_id, mark))
+        return "%s (Account: %s - %s)%s" % (role_name, account_id, account_alias, mark)
+    return "%s (Account %s)%s" % (role_name, account_id, mark)
+
 
 def process_account_and_role_choices(info_indexed_by_account, info_indexed_by_roles, options):
+    """
+    Returns the role strings in menu order, their labels, and the index of the
+    role that --aws-account-id/--aws-role-name select (or None).
+    """
     role_option = None
     selection_info = []
-    index = 0
+    labels = []
     if info_indexed_by_account:
         account_aliases = get_account_aliases_info(options.config_file_path)
-        # Order by role name
+        # Labels from the 'accounts' section of config.yaml win over accounts.yaml
+        config_aliases = getattr(options, 'account_aliases', None)
+        if config_aliases:
+            account_aliases = dict(account_aliases or {})
+            account_aliases['accounts'] = dict(account_aliases.get('accounts') or {}, **config_aliases)
         if len(info_indexed_by_roles) > 0:
-            for role_name, account_ids in sorted(info_indexed_by_roles.items()):                
-                for account_id, role_string in sorted(account_ids.items()):
-                    selection_info.append(role_string)
-                    mark, found = check_info(account_id, role_name, options.aws_account_id, options.aws_role_name)
-                    if found:
-                        role_option = index
-                    pretty_choices(index, role_name, account_id, account_aliases, mark)
-                    index = index + 1
+            # Order by role name
+            entries = [(role_name, account_id, role_string)
+                       for role_name, account_ids in sorted(info_indexed_by_roles.items())
+                       for account_id, role_string in sorted(account_ids.items())]
         else:
-            for account_id, role_names in sorted(info_indexed_by_account.items()):
-                for role_name, role_string in sorted(role_names.items()):
-                    selection_info.append(role_string)
-                    mark, found = check_info(account_id, role_name, options.aws_account_id, options.aws_role_name)
-                    if found:
-                        role_option = index
-                    pretty_choices(index, role_name, account_id, account_aliases, mark)
-                    index = index + 1
+            entries = [(role_name, account_id, role_string)
+                       for account_id, role_names in sorted(info_indexed_by_account.items())
+                       for role_name, role_string in sorted(role_names.items())]
+        for role_name, account_id, role_string in entries:
+            mark, found = check_info(account_id, role_name, options.aws_account_id, options.aws_role_name)
+            if found:
+                role_option = len(selection_info)
+            selection_info.append(role_string)
+            labels.append(format_choice(role_name, account_id, account_aliases, mark))
 
-    return selection_info, role_option
+    return selection_info, labels, role_option
+
 
 def check_info(account_id, role_name, config_account_id, config_role_name):
     mark = ""

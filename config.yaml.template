@@ -1,0 +1,41 @@
+# Settings for onelogin-aws-assume-role. Copy to ~/.onelogin/config.yaml (on
+# Windows C:\Users\<you>\.onelogin\config.yaml), or point --config or the
+# ONELOGIN_AWS_ASSUME_ROLE_CONFIG environment variable at it.
+#
+# Any command-line option can be set here by its long name without the dashes.
+# Put what differs per account in overlays next to this file, e.g.
+# config.accounta.yaml, and pick one with -O accounta.
+# Command-line arguments override this file. Keep the file readable only by you.
+
+# OneLogin API credentials and region (us or eu)
+client_id: ""
+client_secret: ""
+region: us
+
+onelogin-username: jane@example.com
+onelogin-subdomain: example
+onelogin-app-id: 123456
+
+# Keep the OneLogin password in the system keyring (Windows Credential
+# Manager, macOS Keychain, ...): asked once, saved after a successful login,
+# read from there afterwards.
+save-password: true
+
+# MFA device to use without asking, as named in the device list
+# mfa-device: OneLogin Protect
+
+aws-region: us-west-2
+# profile: default
+# file: ~/.aws/credentials
+duration: 3600
+
+# Settings for one --profile, overriding the ones above
+profiles:
+  dev:
+    aws-account-id: "123456789012"
+    aws-role-name: Developer
+
+# Labels shown next to the account ids when picking a role
+accounts:
+  "123456789012": Dev account
+  "987654321012": Production

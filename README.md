@@ -1,5 +1,12 @@
-onelogin-python-aws-assume-role
-===============================
+ya-onelogin-aws-assume-role (unofficial fork)
+=============================================
+
+> [!WARNING]
+> **Unofficial fork.** This is a community fork. It is not the official OneLogin tool and is not supported by OneLogin. The original project is [onelogin/onelogin-python-aws-assume-role](https://github.com/onelogin/onelogin-python-aws-assume-role). The `onelogin-aws-assume-role` package on PyPI is the upstream release. This fork is the package `ya-onelogin-aws-assume-role` ("yet another"), with the commands `ya-onelogin-aws-assume-role`, `olaar` (short) and `onelogin-aws-assume-role` (the original name). Install it from git:
+>
+> `uv tool install --force git+https://github.com/oec-tech/ya-onelogin-aws-assume-role`
+>
+> **Documentation:** https://oec-tech.github.io/ya-onelogin-aws-assume-role/
 
 Assume an AWS Role and get temporary credentials using Onelogin.
 
@@ -7,7 +14,7 @@ Users will be able to choose from among multiple AWS roles in multiple AWS accou
 
 This is really useful for customers that run complex environments with multiple AWS accounts, roles and many different people that need periodic access as it saves manually generating and managing AWS credentials.
 
-This repository contains a python script at [src/aws_assume_role/aws_assume_role.py](https://github.com/onelogin/onelogin-python-aws-assume-role/blob/master/src/aws_assume_role/aws_assume_role.py) that you can execute using `onelogin-aws-assume-role` in order to retrieve the AWS credentials.
+This repository contains a python script at [src/aws_assume_role/aws_assume_role.py](src/aws_assume_role/aws_assume_role.py) that you can execute using `onelogin-aws-assume-role` in order to retrieve the AWS credentials.
 
 OneLogin's Smart MFA cannot be enforced with OneLogin's AWS CLI utility
 
@@ -33,33 +40,25 @@ The project is hosted at github. You can download it from:
 
 #### Pypi
 
-The toolkit is hosted on pypi, you can find the package at [https://pypi.org/project/onelogin-aws-assume-role/](https://pypi.org/project/onelogin-aws-assume-role/)
-
-The quickest way to install the command-line tool is from PyPI:
+The [`onelogin-aws-assume-role`](https://pypi.org/project/onelogin-aws-assume-role/) package on PyPI is the upstream OneLogin release and doesn't include this fork's changes. Install the fork from git instead, as an isolated command-line tool with [uv](https://docs.astral.sh/uv/) (works on Windows too) or [pipx](https://pipx.pypa.io/):
 
 ```
-pip install onelogin-aws-assume-role
+uv tool install --force git+https://github.com/oec-tech/ya-onelogin-aws-assume-role
+pipx install git+https://github.com/oec-tech/ya-onelogin-aws-assume-role
 ```
 
-To install it as an isolated command-line tool (recommended if you just want to
-use it rather than develop on it), use [pipx](https://pypa.github.io/pipx/):
-
-```
-pipx install onelogin-aws-assume-role
-```
-
-This avoids having to manage a virtualenv yourself; `pipx` keeps the tool and
-its dependencies isolated while still putting `onelogin-aws-assume-role` on your
-PATH.
+Either one keeps the tool and its dependencies isolated while still putting `ya-onelogin-aws-assume-role`, `olaar` (short) and `onelogin-aws-assume-role` (the original name) on your PATH.
 
 ### Dependencies
 
-Requires Python 3.8+.
+Requires Python 3.10+.
 
 * boto3  AWS Python SDK
 * requests  HTTP client used to call the OneLogin API
 * pyyaml  YAML parser
 * lxml  XML and HTML processor
+* keyring  Reads and saves the password in the system keyring
+* questionary  Arrow-key menus for picking the MFA device and role
 
 ## Getting started
 
@@ -72,7 +71,7 @@ Virtualenv helps isolating the python environment used to run the toolkit. You c
 Once you have your virtualenv ready and loaded, then you can install the toolkit on it in development mode executing this:
 
 ```
-python setup.py develop
+pip install -e .
 ```
 
 Using this method of deployment the toolkit files will be linked instead of copied, so if you make changes on them you won't need to reinstall the toolkit.
@@ -80,10 +79,51 @@ Using this method of deployment the toolkit files will be linked instead of copi
 If you want install it in a normal mode, execute:
 
 ```
-python setup.py install
+pip install .
 ```
 
-### Settings
+### Settings in one file: `config.yaml`
+
+Every command-line option can be set in a YAML file, so a plain `onelogin-aws-assume-role` is all you need to type. The tool reads the first of:
+
+1. the file given with `--config <path>`
+2. the file in the `ONELOGIN_AWS_ASSUME_ROLE_CONFIG` environment variable
+3. `config.yaml` in the folder given with `-c` / `--config-file-path`
+4. `~/.onelogin/config.yaml` (on Windows, `C:\Users\<you>\.onelogin\config.yaml`)
+
+Use the option names without the leading dashes (`onelogin-username` and `onelogin_username` both work, as do the dest names such as `username`). See [`config.yaml.template`](config.yaml.template):
+
+```yaml
+client_id: "..."               # OneLogin API credentials (-i / -s)
+client_secret: "..."
+region: us                     # OneLogin region (-r)
+onelogin-username: jane@example.com
+onelogin-subdomain: example
+onelogin-app-id: 123456
+aws-region: us-east-1
+profile: my-profile          # AWS profile to write (-p)
+file: ~/.aws/credentials       # (-f)
+duration: 10000                # (-z)
+save-password: true            # keep the password in the system keyring
+mfa-device: OneLogin Protect   # send the push without asking which device
+
+# Settings for one --profile
+profiles:
+  data:
+    aws-account-id: "123456789012"
+    aws-role-name: DataEngineer
+
+# Labels shown next to the account ids when picking a role
+accounts:
+  "123456789012": Data account
+  "210987654321": Production
+```
+
+Overlays let you keep what differs per account in `config.<name>.yaml` next to `config.yaml` and pick it with `-O <name>` (or `ONELOGIN_AWS_ASSUME_ROLE_OVERLAY`); an overlay's settings replace the base file's, and the command line still wins. See the [configuration docs](https://oec-tech.github.io/ya-onelogin-aws-assume-role/configuration/#overlays-one-file-per-account-or-setup).
+
+Precedence, highest first: command line, the `profiles` entry for the selected profile in `config.yaml`, the rest of `config.yaml`, then `onelogin.aws.json` and `onelogin.sdk.json` (described below, still supported). Unknown settings are reported as errors, so typos don't go unnoticed. The file can hold your OneLogin API secret, so keep it readable only by you, and store your password in the keyring rather than in the file (see [Avoid typing your password](#avoid-typing-your-password)).
+
+### Settings in JSON files
 
 The python script uses a settings file, where [OneLogin SDK properties](https://github.com/onelogin/onelogin-python-sdk#getting-started) are placed.
 
@@ -187,10 +227,10 @@ This isn't needed for the script to function but it provides a better user exper
 
 ### Docker installation method
 
-* `git clone git@github.com:onelogin/onelogin-python-aws-assume-role.git`
-* `cd onelogin-python-aws-assume-role`
+* `git clone https://github.com/oec-tech/ya-onelogin-aws-assume-role.git`
+* `cd ya-onelogin-aws-assume-role`
 * Enter your credentials in the `onelogin.sdk.json` file as explained above
-* Save the `onelogin.sdk.json` file in the root directory of the repo
+* Save the `onelogin.sdk.json` file (and optionally a `config.yaml`) in the root directory of the repo; the image copies them to `/root/.onelogin`. Alternatively mount your own folder with `-v ~/.onelogin:/root/.onelogin`
 * `docker build . -t awsaccess:latest`
 * `docker run -it -v ~/.aws:/root/.aws awsaccess:latest onelogin-aws-assume-role --onelogin-username {user_email} --onelogin-subdomain {subdomain} --onelogin-app-id {app_id} --aws-region {aws region} --profile default`
 
@@ -215,11 +255,17 @@ OTP Code (`--otp`)
 and the cli will use this otp only for the first interaction
 requiring a manual OTP Code
 
+#### Avoid typing your password
+
+The tool can read your OneLogin password from the system keyring: Windows Credential Manager, macOS Keychain, or the Secret Service on Linux. The easiest way to set it up is to add `save-password: true` to `config.yaml`: the first run asks for the password and saves it after a successful login, and later runs read it from the keyring. See the [password docs](https://oec-tech.github.io/ya-onelogin-aws-assume-role/password/) for checking, changing and removing it. You can also store it yourself with `keyring set onelogin <username before the @>`.
+
+Once a keyring service is set, the tool offers to save the password whenever it has to ask for it, and updates the saved password when it was wrong (e.g. after you changed it in OneLogin).
+
 Flag `--onelogin-password` is meant for integration with a password manager, like OSX Keychain, 1Password, KeePass, LastPass, etc. e.g.:
 - OSX Keychain: `--onelogin-password $(security find-generic-password -a $USER -s onelogin -w)`
 - 1Password CLI: `--onelogin-password $(op item get "onelogin" --fields label=password)`
 
-However, using any of these leaves your password visible in the process table because command-line arguments are expanded before applications are started.  Mac users can avoid that by reading the password directly from OSX Keychain with arguments `--keychain-account` and/or `--keychain-service`.  Skip the command-line arguments entirely by putting those in `onelogin.aws.json` as `keychain_account` and `keychain_service`, respectively.
+However, using any of these leaves your password visible in the process table because command-line arguments are expanded before applications are started.  You can avoid that by reading the password directly from the system keyring with arguments `--keychain-account` and/or `--keychain-service`, as described above.  Skip the command-line arguments entirely by putting those in `config.yaml` or `onelogin.aws.json` as `keychain_account` and `keychain_service`, respectively.
 - If you specify only the keychain account on the command-line or in `onelogin.aws.json`, it will default to "onelogin" as the keychain service.
 - If you specify only the keychain service, then "keychain account" will use "onelogin username", minus the "@" symbol and everything that follows it.
 
@@ -227,9 +273,11 @@ However, using any of these leaves your password visible in the process table be
 
 With that data, a SAMLResponse is retrieved. And possible AWS Role are retrieved.
 
+If MFA is required, `--mfa-device` (or `mfa-device` in `config.yaml`) picks the device without asking, e.g. `--mfa-device "OneLogin Protect"`. It matches the device name, id or label shown in the device list. For OneLogin Protect the tool checks every 3 seconds whether you approved the push, for up to 90 seconds; `--mfa-poll-interval` changes the interval, and the tool backs off on its own if OneLogin rate-limits the checks.
+
 #### Step 2. Select AWS Role to be assumed.
 
-- Provide the desired AWS Role to be assumed.
+- Provide the desired AWS Role to be assumed. On a terminal, the MFA device and the role are picked from arrow-key menus: type to filter the list, and press Enter. The menus start on the choice you made last time (remembered per user and app in `~/.onelogin/last_choices.json`). `--no-menu` (or `menu: false` in `config.yaml`) brings back the numbered lists. To skip this step, set `aws-account-id` and `aws-role-name` (globally or per profile). The list of roles only arrives after MFA, so this is the way to choose ahead of time. Labels from the `accounts` section of `config.yaml` (or `accounts.yaml`) are shown next to the account ids.
 - Provide the AWS Region instance (required in order to execute the AWS API call).
 
 #### Step 3. AWS Credentials retrieved.
@@ -257,13 +305,13 @@ Activate then the environment
 Then run
 
 ```sh
-> python setup.py install
+> pip install .
 ```
 
-or
+or, to work on the code,
 
 ```sh
-> python setup.py develop
+> pip install -e .
 ```
 
 to install dependencies.
@@ -276,6 +324,10 @@ Assuming you have your AWS Multi Account app set up correctly and you’re using
 > onelogin-aws-assume-role
 ```
 
+Without `--profile` or `--file`, the credentials are printed as lines to paste into your shell. `--output` (`-o`) picks the format: `export` (bash/zsh, the default), `cmd` (Windows Command Prompt, the default on Windows), `powershell`, or `json`. With `json`, only the JSON is printed after the prompts.
+
+When `--aws-region` isn't set, the region prompt defaults to the `AWS_REGION` or `AWS_DEFAULT_REGION` environment variable, then `us-west-2`.
+
 Or alternately save them to your AWS credentials file to enable faster access from any terminal.
 
 ```sh
@@ -284,7 +336,12 @@ Or alternately save them to your AWS credentials file to enable faster access fr
 
 By default, the credentials only last for 1 hour, but you can [edit that restriction on AWS and set a max of 12h session duration](https://aws.amazon.com/es/blogs/security/enable-federated-api-access-to-your-aws-resources-for-up-to-12-hours-using-iam-roles/).
 
-Then set the `-z` or `duration` with the desired credentials session duration. The possible value to be used is limited by the AWS Role. Read more at https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html#id_roles_use_view-role-max-session
+Then set the `-z` or `duration` with the desired credentials session duration. Two limits outside this tool can make the credentials expire earlier:
+
+- The IAM role's *Maximum session duration* (1 hour unless raised). Asking for more fails, and the tool asks for a shorter duration. Read more at https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html#id_roles_use_view-role-max-session
+- The OneLogin session in the SAML response (`SessionNotOnOrAfter`). AWS silently ends the credentials at that time, so `-z` seems to have no effect. Your OneLogin admin can raise the session length of the AWS app.
+
+When the credentials expire noticeably earlier than requested, the tool says so after logging in and names the likely limit. Either way, `--credential-process` (below) renews the credentials for you whenever they expire.
 
 You can also make it regenerate and update the credentials file by using the `--loop` option to specify the number of iterations, and `--time` to specify the minutes between iterations. If you specified a duration, be sure the value you set for the duration session of the credential is bigger than the value you set for the time, so your credentials will be renewed before expiration.
 
@@ -322,9 +379,9 @@ Then use it like any other profile:
 
 With `--credential-process` the tool prints the credentials as the JSON the AWS CLI/SDKs expect, and does not write any file. The credentials are cached in `~/.aws/onelogin/cache` and reused until 15 minutes before they expire (10 minutes for 15-minute sessions), so you only log in to OneLogin (and complete MFA) when they need renewing. Delete that directory to force a new login.
 
-Any prompts (password, MFA, role selection, ...) are shown on your terminal. To avoid them, put the username, app id, subdomain, `aws_region` and the AWS account/role for each profile in `onelogin.aws.json` (see the `profiles` setting above) and use the keychain options for the password. Each `--profile`, account and role gets its own cache entry. If the tool is started without a terminal, for example by an IDE, the prompts go to stderr instead, which the AWS CLI and most SDKs don't show, so everything except MFA needs to be configured.
+Any prompts (password, MFA, role selection, ...) are shown on your terminal. To avoid them, put the username, app id, subdomain, `aws_region` and the AWS account/role for each profile in `config.yaml` (see the `profiles` setting above), save the password in the keyring and set `mfa-device`. Then renewing the credentials only needs you to approve the MFA push. Each `--profile`, account and role gets its own cache entry. If the tool is started without a terminal, for example by an IDE, the prompts go to stderr instead, which the AWS CLI and most SDKs don't show, so everything except MFA needs to be configured.
 
-`--credential-process` can't be combined with `--file`, `--loop` or `--interactive`.
+`--credential-process` can't be combined with `--file`, `--loop` or `--interactive` on the command line; when those are set in `config.yaml` they're ignored in this mode.
 
 ## Test your credentials with AWS CLI
 
@@ -346,15 +403,13 @@ aws ec2 describe-instances
 
 ## Development
 
-After checking out the repo, run `pip setup install` or `python setup.py develop` to install dependencies.
+After checking out the repo, run `pip install -e ".[dev]"` to install the tool with its dependencies and the linter. Run the tests with `python -m unittest discover -s tests` and the linter with `ruff check src tests`.
 
-To release a new version, update the version number in `src/onelogin/api/version.py` and commit it, then you will be able to update it to pypi.
-with `python setup.py sdist upload` and `python setup.py bdist_wheel upload`.
-Create also a release tag on github.
+To release a new version, update the version number in `src/aws_assume_role/version.py` and commit it, then publish a GitHub release tagged `v<version>`: the `Publish to PyPI` workflow builds and uploads the package.
 
 ## Contributing
 
-Bug reports and pull requests are welcome on GitHub at https://github.com/onelogin/onelogin-python-aws-assume-role. This project is intended to be a safe, welcoming space for collaboration, and contributors are expected to adhere to the [Contributor Covenant](http://contributor-covenant.org) code of conduct.
+Bug reports and pull requests for this fork are welcome at https://github.com/oec-tech/ya-onelogin-aws-assume-role. This project is intended to be a safe, welcoming space for collaboration, and contributors are expected to adhere to the [Contributor Covenant](http://contributor-covenant.org) code of conduct.
 
 ## License
 
@@ -362,4 +417,4 @@ The gem is available as open source under the terms of the [MIT License](http://
 
 ## Code of Conduct
 
-Everyone interacting in the OneLogin Assume AWS Role project’s codebases, issue trackers, chat rooms and mailing lists is expected to follow the [code of conduct](https://github.com/onelogin/onelogin-python-aws-assume-role/blob/master/CODE_OF_CONDUCT.md).
+Everyone interacting in the OneLogin Assume AWS Role project’s codebases, issue trackers, chat rooms and mailing lists is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
