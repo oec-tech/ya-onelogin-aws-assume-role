@@ -20,9 +20,10 @@ a `credential_process`.
 - **[No more typing your password](password.md)**: it is saved in Windows
   Credential Manager, macOS Keychain or the Linux Secret Service.
 - **[Faster MFA](mfa.md)**: pick your device ahead of time with `--mfa-device`;
-  push approval is noticed within about 3 seconds.
-- **A modern terminal UI**: colored status lines, a spinner while you approve
-  the push, a summary of the new credentials, and arrow-key menus with
+  push approval is noticed within about 3 seconds, and you can type the code
+  from the app at any time instead.
+- **A modern terminal UI**: colored status lines, a spinner while you wait,
+  a summary of the new credentials, and arrow-key menus with
   type-to-filter that start on your last choice. With `-p`, the role menu shows
   only the roles of that profile's account or role name first.
 - **[Automatic renewal](credential-process.md)** through the AWS
@@ -45,7 +46,8 @@ $ olaar -p data
 ╰──────────────────────────────────────────────────╯
 ✔ Using the password saved in the keyring
 ✔ MFA device: OneLogin Protect (Pixel)
-⠋ Approve the push notification in OneLogin Protect...
+? Approve the push in OneLogin Protect, or type the code from the app:
+✔ Push approved
 ✔ Logged in to OneLogin
 ✔ Role DataEngineer in account 123456789012 (from your settings)
 ╭─ AWS credentials saved ────────────────────────────╮
