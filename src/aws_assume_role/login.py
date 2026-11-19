@@ -145,6 +145,7 @@ def wait_for_push(client, app_id, device_id, state_token, response, poll_interva
 
 
 PUSH_DONE = object()
+PUSH_EXPIRED = object()
 
 
 def wait_for_push_or_code(client, app_id, device_id, state_token, response, poll_interval):
@@ -160,7 +161,6 @@ def wait_for_push_or_code(client, app_id, device_id, state_token, response, poll
         import copy
         import threading
         import questionary
-        from prompt_toolkit.application import run_in_terminal
     except ImportError:
         with ui.waiting("Approve the push notification in OneLogin Protect..."):
             return wait_for_push(client, app_id, device_id, state_token, response, poll_interval), None
@@ -191,8 +191,9 @@ def wait_for_push_or_code(client, app_id, device_id, state_token, response, poll
         if result['response'] is not None and result['response'].type == 'success':
             notify(lambda: app.exit(result=PUSH_DONE))
         else:
-            notify(lambda: run_in_terminal(
-                lambda: ui.warn("The push wasn't approved in time; type the code from the app")))
+            # Waited too long: close the question so the caller can offer a new push
+            # (unless a code is being typed: then let it be finished)
+            notify(lambda: None if app.current_buffer.text.strip() else app.exit(result=PUSH_EXPIRED))
 
     thread = threading.Thread(target=watch, daemon=True)
     thread.start()
@@ -204,6 +205,8 @@ def wait_for_push_or_code(client, app_id, device_id, state_token, response, poll
     stop.set()
     pushed = result.get('response')
     if answer is PUSH_DONE or (pushed is not None and pushed.type == 'success'):
+        return pushed, None
+    if answer is PUSH_EXPIRED:
         return pushed, None
     return None, answer.strip()
 
@@ -328,7 +331,13 @@ def get_saml_response(client, username_or_email, password, app_id, onelogin_subd
                     elif typed_code:
                         cmd_otp = typed_code
                     else:
-                        ui.warn("The push wasn't approved in time; enter the code from the app instead")
+                        ui.warn("The push took too long: OneLogin didn't report an approval in %s seconds"
+                                % PUSH_TIMEOUT)
+                        if ui.confirm("Send a new push?"):
+                            # Start over with a fresh login, which also brings a fresh state token
+                            return get_saml_response(client, username_or_email, password, app_id, onelogin_subdomain,
+                                                     ip, {'device_id': device_id, 'device_type': device_type},
+                                                     mfa_device=mfa_device, poll_interval=poll_interval)
 
                 if not verified_with_push:
                     if cmd_otp:

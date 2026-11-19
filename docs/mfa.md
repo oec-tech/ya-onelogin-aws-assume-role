@@ -31,9 +31,13 @@ approved the push, for up to 90 seconds. Change the interval with
 `--mfa-poll-interval` (1 to 30 seconds). When OneLogin rate-limits the checks,
 the tool waits twice as long each time, up to 30 seconds. A dropped
 connection or a server error doesn't end the checks, and an API token that
-expires while waiting is renewed. After 90 seconds the question stays open
-for the code. Without a terminal (scripts, `--credential-process`), it only
-waits for the push and asks for the code afterwards.
+expires while waiting is renewed.
+
+When no approval arrives within 90 seconds, the tool says the push took too
+long and asks whether to send a new one. Answer yes for a fresh push, or no to
+type the code from the app instead. (If you are in the middle of typing a
+code at that moment, you can finish it first.) Without a terminal (scripts,
+`--credential-process`), it only waits for the push, then asks the same.
 
 ### The push was approved but nothing happened
 
