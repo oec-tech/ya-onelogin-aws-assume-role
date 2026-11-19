@@ -149,8 +149,11 @@ def check_config(options, environ=None, keyring_module=None):
         for level, message in profile_usage_hints(write_profile, environ, os.name == 'nt'):
             getattr(ui, level)(message)
 
+    warnings = sum(1 for level, _ in problems if level == 'warn')
     if errors:
         ui.error("%s problem(s) to fix before logging in" % errors)
+    elif warnings:
+        ui.warn("A login can work, but check the warning(s) above")
     else:
         ui.ok("The config looks good")
     return 1 if errors else 0
