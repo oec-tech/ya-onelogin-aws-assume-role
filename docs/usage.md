@@ -32,6 +32,54 @@ same command; the examples use the full name.
 
     See [automatic renewal](credential-process.md).
 
+## "The security token included in the request is expired"
+
+When the login succeeded but `aws s3 ls` still says the token expired, the AWS
+CLI is not using the credentials that were just saved. The summary at the end
+of a run names the profile it wrote. Check these, in this order:
+
+1. **Old credentials in the shell.** `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+   and `AWS_SESSION_TOKEN` win over every profile. They are often left over from
+   pasting the printed `set ...` lines earlier. Clear them, or open a new terminal:
+
+    === "cmd"
+
+        ```bat
+        set AWS_ACCESS_KEY_ID=
+        set AWS_SECRET_ACCESS_KEY=
+        set AWS_SESSION_TOKEN=
+        set AWS_SECURITY_TOKEN=
+        ```
+
+    === "PowerShell"
+
+        ```powershell
+        Remove-Item Env:AWS_ACCESS_KEY_ID, Env:AWS_SECRET_ACCESS_KEY, Env:AWS_SESSION_TOKEN, Env:AWS_SECURITY_TOKEN -ErrorAction SilentlyContinue
+        ```
+
+    === "bash/zsh"
+
+        ```sh
+        unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN
+        ```
+
+2. **A different profile.** Without `--profile`, the AWS CLI uses `AWS_PROFILE`,
+   or else `[default]`. With `olaar -p data`, use `aws s3 ls --profile data`, or
+   `set AWS_PROFILE=data` (PowerShell: `$env:AWS_PROFILE="data"`).
+3. **Nothing was saved.** Without `-p` (and without `profile:` in the config),
+   the credentials are only printed for you to paste, and the summary says
+   "Profile: none".
+
+4. **Another credentials file.** The tool writes to `AWS_SHARED_CREDENTIALS_FILE`
+   when it's set, like the AWS CLI, and to `~/.aws/credentials` otherwise
+   (`-f`/`file:` overrides both).
+
+`aws configure list` (add `--profile NAME` to check one profile) shows which
+profile the AWS CLI picked and where its keys came from: `env` means variables
+in the shell, `shared-credentials-file` means the file this tool writes.
+
+The tool checks 1 and 2 after saving and prints a warning when either applies.
+
 ## Choosing the region
 
 `--aws-region` (or `aws-region:`) sets the AWS region written with the
@@ -47,6 +95,9 @@ credentials. Without it, the tool asks, suggesting `$AWS_REGION`,
 - `--cache-saml` keeps the last SAML response in `~/.aws/saml_cache.txt`
   (readable only by you) to switch roles without logging in again while it is
   valid.
+- `--init-profiles` logs in once and writes a profile for every role you have,
+  named after the account aliases (see
+  [Configuration](configuration.md#generate-profiles-for-all-your-roles)).
 - `--role_order` sorts the role menu by role name instead of account id.
 
 ## All options
@@ -125,6 +176,11 @@ options:
   --mfa-device MFA_DEVICE
                         MFA device to use without asking, e.g. "OneLogin Protect" or "Google
                         Authenticator" (matches the name shown in the device list)
+  --check-config        Check the config files and show the profiles and settings in effect,
+                        without logging in
+  --init-profiles       Log in once, then write a profile for every AWS role you have, named after
+                        the account aliases, to a 'generated:' block of config.yaml. Your own
+                        'profiles:' and 'accounts:' win over it
   --mfa-poll-interval MFA_POLL_INTERVAL
                         Seconds between checks whether a push notification was approved (Default
                         value: 3)

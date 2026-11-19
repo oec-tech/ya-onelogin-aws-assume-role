@@ -26,7 +26,7 @@ from aws_assume_role import aws_assume_role, credential_process, options, prompt
 def _options(**overrides):
     values = dict(subdomain='acme', username='user@acme.com', app_id='123',
                   aws_account_id='111111111111', aws_role_name='Admin',
-                  profile_name='dev', duration=3600, credential_process=True)
+                  profile_name='dev', duration=3600, credential_process=True, check_config=False)
     values.update(overrides)
     return mock.Mock(**values)
 

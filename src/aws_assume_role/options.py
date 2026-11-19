@@ -157,6 +157,17 @@ def build_parser():
     parser.add_argument("--mfa-device",
                         dest="mfa_device",
                         help="MFA device to use without asking, e.g. \"OneLogin Protect\" or \"Google Authenticator\" (matches the name shown in the device list)")
+    parser.add_argument("--check-config",
+                        dest="check_config",
+                        default=False,
+                        action="store_true",
+                        help="Check the config files and show the profiles and settings in effect, without logging in")
+    parser.add_argument("--init-profiles",
+                        dest="init_profiles",
+                        default=False,
+                        action="store_true",
+                        help="Log in once, then write a profile for every AWS role you have, named after the account aliases, "
+                             "to a 'generated:' block of config.yaml. Your own 'profiles:' and 'accounts:' win over it")
     parser.add_argument("--mfa-poll-interval",
                         dest="mfa_poll_interval",
                         type=int,
@@ -206,6 +217,11 @@ def get_options(argv=None):
     options.overlays = overlay_names
     options.config_files = [path for path in [yaml_path] + overlay_paths if path]
     options.account_aliases = yaml_config.get('accounts')
+    options.yaml_profiles = yaml_config.get('profiles', {})
+    options.generated_profiles = yaml_config.get('generated_profiles', set())
+    options.own_account_names = yaml_config.get('own_accounts', {})
+    options.selected_profile = profile_name
+    options.overlay_paths = overlay_paths
 
     if options.credential_process:
         if cli_provided & {'file', 'loop', 'interactive'}:
@@ -285,6 +301,28 @@ def find_yaml_config(config, config_file_path):
     return None
 
 
+class UniqueKeyLoader(yaml.SafeLoader):
+    """
+    A YAML loader that rejects a key repeated in one mapping, which plain YAML
+    loading silently resolves by keeping the last one.
+    """
+
+
+def _construct_unique_mapping(loader, node, deep=False):
+    seen = {}
+    for key_node, _ in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in seen:
+            raise yaml.constructor.ConstructorError(
+                "while reading a mapping", node.start_mark,
+                "'%s' appears twice (first on line %s)" % (key, seen[key] + 1), key_node.start_mark)
+        seen[key] = key_node.start_mark.line
+    return loader.construct_mapping(node, deep=deep)
+
+
+UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping)
+
+
 def load_yaml_config(parser, path):
     """
     Reads config.yaml: any command-line option by name, plus 'profiles'
@@ -293,7 +331,7 @@ def load_yaml_config(parser, path):
     """
     try:
         with open(os.path.expanduser(path)) as f:
-            data = yaml.safe_load(f) or {}
+            data = yaml.load(f, Loader=UniqueKeyLoader) or {}
     except OSError as e:
         parser.error("can't read the config file %s: %s" % (path, e.strerror))
     except yaml.YAMLError as e:
@@ -327,14 +365,29 @@ def load_yaml_config(parser, path):
             converted[dest] = value
         return converted
 
-    profiles = data.pop('profiles', None) or {}
-    accounts = data.pop('accounts', None) or {}
-    if not isinstance(profiles, dict) or not isinstance(accounts, dict):
-        parser.error("'profiles' and 'accounts' in %s must be mappings" % path)
+    def sections(source, where):
+        profiles = source.pop('profiles', None) or {}
+        accounts = source.pop('accounts', None) or {}
+        if not isinstance(profiles, dict) or not isinstance(accounts, dict):
+            parser.error("'profiles' and 'accounts' in %s%s must be mappings" % (where, path))
+        return ({str(name): convert("profile '%s'" % name, values or {}) for name, values in profiles.items()},
+                {str(account): str(label) for account, label in accounts.items()})
+
+    # 'generated' is written by --init-profiles; what you write yourself wins over it
+    generated = data.pop('generated', None) or {}
+    if not isinstance(generated, dict):
+        parser.error("'generated' in %s must be a mapping" % path)
+    generated_profiles, generated_accounts = sections(dict(generated), "'generated' in ")
+    profiles, accounts = sections(data, "")
+    merged_profiles = {name: dict(values) for name, values in generated_profiles.items()}
+    for name, values in profiles.items():
+        merged_profiles[name] = dict(merged_profiles.get(name, {}), **values)
     return {
         'global': convert('', data),
-        'profiles': {str(name): convert("profile '%s'" % name, values or {}) for name, values in profiles.items()},
-        'accounts': {str(account): str(label) for account, label in accounts.items()},
+        'profiles': merged_profiles,
+        'accounts': dict(generated_accounts, **accounts),
+        'generated_profiles': set(generated_profiles) - set(profiles),
+        'own_accounts': accounts,
     }
 
 
@@ -382,4 +435,7 @@ def merge_yaml_configs(base, overlay):
         'global': dict(base.get('global', {}), **overlay.get('global', {})),
         'profiles': profiles,
         'accounts': dict(base.get('accounts', {}), **overlay.get('accounts', {})),
+        'generated_profiles': (base.get('generated_profiles', set()) | overlay.get('generated_profiles', set()))
+        - (set(overlay.get('profiles', {})) - overlay.get('generated_profiles', set())),
+        'own_accounts': dict(base.get('own_accounts', {}), **overlay.get('own_accounts', {})),
     }

@@ -236,9 +236,45 @@ def print_credentials(aws_session_token, aws_region, output=None):
     if output == 'json':
         print(format_credentials(aws_session_token, aws_region, output))
         return
-    ui.summary("AWS credentials ready", credential_rows(aws_session_token, aws_region))
+    rows = [("Profile", "none: not saved (use -p NAME to save them to an AWS profile)")]
+    rows += credential_rows(aws_session_token, aws_region)
+    ui.summary("AWS credentials ready", rows)
     ui.note("Paste these lines into your shell to use them:")
     print(format_credentials(aws_session_token, aws_region, output))
+
+
+ENV_CREDENTIALS = ('AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_SECURITY_TOKEN')
+
+
+def default_credentials_file(environ):
+    # The AWS CLI and SDKs read AWS_SHARED_CREDENTIALS_FILE instead of ~/.aws/credentials when it's set
+    return os.path.expanduser(environ.get('AWS_SHARED_CREDENTIALS_FILE') or '~/.aws/credentials')
+
+
+def profile_usage_hints(profile_name, environ, windows=False):
+    """
+    Returns (level, message) pairs that say how to use the saved profile and
+    what in the environment would make the AWS CLI ignore it.
+    """
+    hints = []
+    in_env = [name for name in ENV_CREDENTIALS if environ.get(name)]
+    if in_env:
+        hints.append(('warn', "Old AWS credentials are set in this shell (%s). They win over every profile, "
+                      "so `aws` won't use the new ones." % ", ".join(in_env)))
+        if windows:
+            hints.append(('note', "  Clear them (cmd):        %s" % " & ".join("set %s=" % name for name in in_env)))
+            hints.append(('note', "  Clear them (PowerShell): Remove-Item %s" % ", ".join("Env:%s" % name for name in in_env)))
+        else:
+            hints.append(('note', "  Clear them: unset %s" % " ".join(in_env)))
+    set_cmd = ("set AWS_PROFILE=%s" if windows else "export AWS_PROFILE=%s") % profile_name
+    active = environ.get('AWS_PROFILE') or environ.get('AWS_DEFAULT_PROFILE')
+    if active and active != profile_name:
+        hints.append(('warn', "AWS_PROFILE is '%s', so `aws` uses that profile, not '%s'." % (active, profile_name)))
+        hints.append(('note', "  Switch: %s" % set_cmd))
+    elif not active and profile_name != 'default':
+        hints.append(('note', "Plain `aws` uses [default]. Use this profile with:"))
+        hints.append(('note', "  aws s3 ls --profile %s    or    %s" % (profile_name, set_cmd)))
+    return hints
 
 
 def save_credentials(config_file_writer, aws_file, profile_name, aws_session_token, aws_region):
@@ -284,6 +320,12 @@ def main():
     options = get_options()
     # On Windows a credential_process prompts on CONOUT$, which the menus can't drive
     prompts.use_menus = options.menu and not (options.credential_process and os.name == 'nt')
+    if options.check_config:
+        try:
+            from aws_assume_role.check_config import check_config
+        except ImportError:
+            from check_config import check_config
+        sys.exit(check_config(options))
     if options.credential_process:
         credential_process(options, assume_role)
     else:
@@ -314,7 +356,7 @@ def assume_role(options):
     profile_name = write_profile or "default"
 
     if options.file is None:
-        aws_file = os.path.expanduser('~/.aws/credentials')
+        aws_file = default_credentials_file(os.environ)
     else:
         aws_file = options.file
 
@@ -448,6 +490,14 @@ def assume_role(options):
                     result = None
                     iterations = append_iterations(iterations)
                     continue
+            elif getattr(options, 'init_profiles', False):
+                try:
+                    from aws_assume_role.init_profiles import init_profiles
+                except ImportError:
+                    from init_profiles import init_profiles
+                init_profiles(attributes[ROLE_ATTRIBUTE], saml_response, options,
+                              options.aws_region or get_default_aws_region())
+                return
             else:
                 selected_role = choose_role(attributes[ROLE_ATTRIBUTE], options, onelogin_subdomain, username_or_email, app_id)
                 if selected_role is None:
@@ -537,11 +587,11 @@ def assume_role(options):
                 config_file_writer = ConfigFileWriter()
             save_credentials(config_file_writer, aws_file, profile_name, aws_session_token, aws_region)
 
-            rows = credential_rows(aws_session_token, aws_region)
-            rows.append(("Saved to", "profile [%s] in %s" % (profile_name, shorten_home(aws_file))))
-            ui.summary("AWS credentials saved", rows)
-            if profile_name != "default":
-                ui.note("Use it with: aws --profile %s ...  or set AWS_PROFILE=%s" % (profile_name, profile_name))
+            rows = [("Profile", profile_name), ("File", shorten_home(aws_file))]
+            rows += credential_rows(aws_session_token, aws_region)
+            ui.summary("AWS credentials saved to profile '%s'" % profile_name, rows)
+            for level, message in profile_usage_hints(profile_name, os.environ, os.name == 'nt'):
+                getattr(ui, level)(message)
 
         if options.interactive:
             if ui.confirm("Get credentials for another role of %s?" % username_or_email, default=False):
