@@ -60,6 +60,20 @@ With the example above, `-p data` assumes `DataEngineer` in `123456789012` and
 writes `[data]`; a name without an entry (or no `-p` at all, with
 `profile: my-profile` at the top) shows the role menu and writes that name.
 
+When your config has profiles but none is called `NAME`, it's most likely a
+typo, so the tool warns before logging in and suggests the closest names:
+
+```text
+! Profile 'data-egn' isn't in your config, so its account and role aren't preselected.
+  Did you mean: 'data-eng', 'data'?
+? Use 'data-eng' instead? (Y/n)
+```
+
+Answer yes to use the suggested profile, or no to go on with the full role
+menu and save to `[data-egn]`. Without a terminal (scripts) it only warns.
+A config without any profiles never warns, so the classic use of `-p` to name
+the AWS profile still works quietly. `--check-config` shows the same warning.
+
 To have several entries write to the **same** AWS profile, give them an
 `aws-profile`:
 

@@ -332,6 +332,41 @@ def main():
         assume_role(options)
 
 
+def similar_profiles(name, known):
+    """
+    Returns the configured profile names that look like a typo of name.
+    """
+    import difflib
+    lowered = {k.lower(): k for k in known}
+    matches = difflib.get_close_matches(name.lower(), list(lowered), n=3, cutoff=0.6)
+    # A name that only differs in case, or is a prefix of one, counts too
+    matches += [k for k in lowered if k not in matches and name.lower() in k and len(name) >= 3]
+    return [lowered[m] for m in matches[:3]]
+
+
+def check_profile_name(options, ask=True):
+    """
+    Warns when -p NAME has no entry in the config although the config defines
+    profiles, which usually means a typo. Offers the closest name on a
+    terminal. Returns the profile name to use.
+    """
+    name = getattr(options, 'selected_profile', None)
+    known = getattr(options, 'known_profiles', None) or set()
+    if not name or not known or name in known:
+        return name
+    suggestions = similar_profiles(name, known)
+    ui.warn("Profile '%s' isn't in your config, so its account and role aren't preselected." % name)
+    if suggestions:
+        ui.note("  Did you mean: %s?" % ", ".join("'%s'" % s for s in suggestions))
+        if ask and prompts.menus_available() and ui.confirm("Use '%s' instead?" % suggestions[0]):
+            return suggestions[0]
+    else:
+        ui.note("  Known profiles: %s  (olaar --check-config lists them)" % ", ".join(sorted(known)[:8])
+                + (" ..." if len(known) > 8 else ""))
+    ui.note("  Going on with the full role menu; the credentials are saved to [%s]." % (options.aws_profile or name))
+    return name
+
+
 def assume_role(options):
     """
     Logs in to OneLogin and assumes the selected AWS role, then prints or saves
@@ -339,6 +374,11 @@ def assume_role(options):
     AssumeRoleWithSAML response instead.
     """
     ui.banner(__version__)
+    if not options.credential_process:
+        chosen = check_profile_name(options)
+        if chosen != options.selected_profile:
+            # Load the settings again as if -p had named the suggested profile
+            vars(options).update(vars(get_options(sys.argv[1:] + ['--profile', chosen])))
 
     client = get_client(options)
 

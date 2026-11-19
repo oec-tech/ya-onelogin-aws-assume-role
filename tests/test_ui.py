@@ -138,6 +138,46 @@ class CredentialsFileTest(unittest.TestCase):
         self.assertEqual(aws_assume_role.default_credentials_file({}), os.path.expanduser('~/.aws/credentials'))
 
 
+class ProfileNameTest(unittest.TestCase):
+    KNOWN = {'data-eng', 'prod-admin', 'prod-readonly', 'sandbox-dev'}
+
+    def _check(self, name, known=None, aws_profile=None):
+        options = SimpleNamespace(selected_profile=name, known_profiles=self.KNOWN if known is None else known,
+                                  aws_profile=aws_profile)
+        with redirect_stdout(StringIO()) as out:
+            result = aws_assume_role.check_profile_name(options, ask=False)
+        return result, out.getvalue()
+
+    def test_suggests_close_names(self):
+        self.assertEqual(aws_assume_role.similar_profiles('prod-admn', self.KNOWN)[0], 'prod-admin')
+        self.assertEqual(aws_assume_role.similar_profiles('Data-Eng', self.KNOWN), ['data-eng'])
+        self.assertIn('sandbox-dev', aws_assume_role.similar_profiles('sandbox', self.KNOWN))
+        self.assertEqual(aws_assume_role.similar_profiles('zzz', self.KNOWN), [])
+
+    def test_warns_about_an_unknown_name(self):
+        name, text = self._check('prod-admn')
+
+        self.assertEqual(name, 'prod-admn')
+        self.assertIn("Profile 'prod-admn' isn't in your config", text)
+        self.assertIn("Did you mean: 'prod-admin'", text)
+        self.assertIn("saved to [prod-admn]", text)
+
+    def test_lists_the_known_names_when_nothing_is_close(self):
+        _, text = self._check('zzz')
+        self.assertIn('Known profiles: data-eng, prod-admin', text)
+
+    def test_quiet_for_known_names_or_a_config_without_profiles(self):
+        self.assertEqual(self._check('data-eng'), ('data-eng', ''))
+        self.assertEqual(self._check('anything', known=set()), ('anything', ''))
+        self.assertEqual(self._check(None), (None, ''))
+
+    def test_offers_the_closest_name_on_a_terminal(self):
+        options = SimpleNamespace(selected_profile='prod-admn', known_profiles=self.KNOWN, aws_profile=None)
+        with mock.patch.object(prompts, 'menus_available', return_value=True), \
+                mock.patch.object(ui, 'confirm', return_value=True), redirect_stdout(StringIO()):
+            self.assertEqual(aws_assume_role.check_profile_name(options), 'prod-admin')
+
+
 class PlainFallbackTest(unittest.TestCase):
     def setUp(self):
         patcher = mock.patch.object(prompts, 'menus_available', return_value=False)

@@ -221,6 +221,7 @@ def get_options(argv=None):
     options.generated_profiles = yaml_config.get('generated_profiles', set())
     options.own_account_names = yaml_config.get('own_accounts', {})
     options.selected_profile = profile_name
+    options.known_profiles = set(options.yaml_profiles) | set(json_config.get('profiles') or {})
     options.overlay_paths = overlay_paths
 
     if options.credential_process:
