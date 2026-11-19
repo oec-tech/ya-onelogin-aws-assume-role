@@ -156,3 +156,17 @@ def summary(title, rows, style="green"):
             table.add_row(label, _escape(value))
     _console().print(Panel(table, title="[bold %s]%s[/]" % (style, _escape(title)), title_align="left",
                            border_style=style, expand=False))
+
+
+def table(title, headers, rows):
+    """
+    Prints a table with a title and column headers.
+    """
+    from rich.table import Table
+    from rich import box
+    table = Table(title=title, title_justify="left", title_style="bold", box=box.SIMPLE_HEAD, show_edge=False)
+    for header in headers:
+        table.add_column(header, overflow="fold")
+    for row in rows:
+        table.add_row(*[_escape(cell) for cell in row])
+    _console().print(table)

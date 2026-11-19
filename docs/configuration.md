@@ -101,6 +101,32 @@ it for one run.
 
     `-p abcd-myrole` or `-p abcd-other` picks the role, and either one writes `[abcd]`.
 
+## Check your config
+
+```console
+olaar --check-config            # the default profile
+olaar -p data --check-config    # what `olaar -p data` would do
+```
+
+This reads the config files the way a login would. It doesn't contact OneLogin
+or AWS. It shows:
+
+- which files it used (config, overlays, API keys) and which credentials file it writes;
+- the OneLogin settings, and whether a password is saved in the keyring;
+- a table of the `profiles:` entries: account, role, and the AWS profile each one writes;
+- what this run would do: account, role, region, session length and the profile it saves to.
+
+It warns about:
+
+- account ids that aren't 12 digits (an unquoted number in YAML loses its leading zeros);
+- entries that name only an account or only a role, which show the role menu;
+- several entries writing the same AWS profile;
+- old `AWS_*` variables or another `AWS_PROFILE` in the shell, which would make the AWS CLI ignore the saved profile.
+
+A config the tool can't read at all stops with the reason. That covers YAML
+errors, unknown settings and repeated names. The check exits with status 1 when
+a login can't work, such as missing API keys, so it also works in scripts.
+
 ## Overlays: one file per account or setup
 
 Keep the shared settings in `config.yaml` and put what differs in overlay files

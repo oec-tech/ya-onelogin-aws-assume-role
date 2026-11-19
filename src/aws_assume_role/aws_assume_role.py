@@ -320,6 +320,12 @@ def main():
     options = get_options()
     # On Windows a credential_process prompts on CONOUT$, which the menus can't drive
     prompts.use_menus = options.menu and not (options.credential_process and os.name == 'nt')
+    if options.check_config:
+        try:
+            from aws_assume_role.check_config import check_config
+        except ImportError:
+            from check_config import check_config
+        sys.exit(check_config(options))
     if options.credential_process:
         credential_process(options, assume_role)
     else:

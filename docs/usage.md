@@ -173,6 +173,8 @@ options:
   --mfa-device MFA_DEVICE
                         MFA device to use without asking, e.g. "OneLogin Protect" or "Google
                         Authenticator" (matches the name shown in the device list)
+  --check-config        Check the config files and show the profiles and settings in effect,
+                        without logging in
   --mfa-poll-interval MFA_POLL_INTERVAL
                         Seconds between checks whether a push notification was approved (Default
                         value: 3)

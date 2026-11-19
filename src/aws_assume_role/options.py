@@ -157,6 +157,11 @@ def build_parser():
     parser.add_argument("--mfa-device",
                         dest="mfa_device",
                         help="MFA device to use without asking, e.g. \"OneLogin Protect\" or \"Google Authenticator\" (matches the name shown in the device list)")
+    parser.add_argument("--check-config",
+                        dest="check_config",
+                        default=False,
+                        action="store_true",
+                        help="Check the config files and show the profiles and settings in effect, without logging in")
     parser.add_argument("--mfa-poll-interval",
                         dest="mfa_poll_interval",
                         type=int,
@@ -206,6 +211,9 @@ def get_options(argv=None):
     options.overlays = overlay_names
     options.config_files = [path for path in [yaml_path] + overlay_paths if path]
     options.account_aliases = yaml_config.get('accounts')
+    options.yaml_profiles = yaml_config.get('profiles', {})
+    options.selected_profile = profile_name
+    options.overlay_paths = overlay_paths
 
     if options.credential_process:
         if cli_provided & {'file', 'loop', 'interactive'}:
