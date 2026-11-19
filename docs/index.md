@@ -21,8 +21,10 @@ a `credential_process`.
   Credential Manager, macOS Keychain or the Linux Secret Service.
 - **[Faster MFA](mfa.md)**: pick your device ahead of time with `--mfa-device`;
   push approval is noticed within about 3 seconds.
-- **Arrow-key menus** with type-to-filter for the MFA device and AWS role, starting
-  on your last choice.
+- **A modern terminal UI**: colored status lines, a spinner while you approve
+  the push, a summary of the new credentials, and arrow-key menus with
+  type-to-filter that start on your last choice. With `-p`, the role menu shows
+  only the roles of that profile's account or role name first.
 - **[Automatic renewal](credential-process.md)** through the AWS
   `credential_process` setting, so you only approve the MFA push when the
   credentials run out.
@@ -36,16 +38,23 @@ a `credential_process`.
 With a [config file](configuration.md) and a [saved password](password.md):
 
 ```console
-$ olaar
-OneLogin AWS Assume Role Tool
-
-Using MFA device: OneLogin Protect (Pixel)
-PUSH with OTP token sent to device 1234567, waiting for approval...
-
-Obtained SAMLResponse from OneLogin to be used at AWS
-? Select the desired AWS Role (arrow keys to move, type to filter, Enter to select)
- » DataEngineer (Account: 123456789012 - Data account)
-   ReadOnly (Account: 210987654321 - Production)
+$ olaar -p data
+╭──────────────────────────────────────────────────╮
+│ olaar  OneLogin → AWS  v2.1.1                    │
+│ ya-onelogin-aws-assume-role, an unofficial fork  │
+╰──────────────────────────────────────────────────╯
+✔ Using the password saved in the keyring
+✔ MFA device: OneLogin Protect (Pixel)
+⠋ Approve the push notification in OneLogin Protect...
+✔ Logged in to OneLogin
+✔ Role DataEngineer in account 123456789012 (from your settings)
+╭─ AWS credentials saved ────────────────────────────╮
+│ Role      DataEngineer                             │
+│ Account   123456789012                             │
+│ Expires   2026-01-01 22:00 (in 12h 0m)             │
+│ Region    us-east-1                                │
+│ Saved to  profile [data] in ~/.aws/credentials     │
+╰────────────────────────────────────────────────────╯
 ```
 
 Next: [install it](install.md).

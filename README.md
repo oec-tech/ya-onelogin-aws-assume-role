@@ -59,6 +59,7 @@ Requires Python 3.10+.
 * lxml  XML and HTML processor
 * keyring  Reads and saves the password in the system keyring
 * questionary  Arrow-key menus for picking the MFA device and role
+* rich  Colored status lines, spinners and the credentials summary
 
 ## Getting started
 

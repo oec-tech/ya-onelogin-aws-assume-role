@@ -57,7 +57,6 @@ def get_data_from_cache():
         cache_contents (dict): decoded SAML assertion.
     """
     if not os.path.exists(SAML_CACHE_PATH):
-        print('Cache file does not exist!')
         return
 
     with open(SAML_CACHE_PATH, 'r') as f:
@@ -72,7 +71,7 @@ def write_data_to_cache(contents):
     Arguments:
         contents (dict): all not confidential information from OneLogin returned after a successful SAML authentication.
     """
-    print('Writing SAML cache to {saml_cache}'.format(saml_cache=SAML_CACHE_PATH))
+    print('Saved the OneLogin login for reuse in {saml_cache}'.format(saml_cache=SAML_CACHE_PATH))
     # Avoid storing password and otp_token
     if 'password' in contents:
         del contents['password']
@@ -97,7 +96,7 @@ def clean_cache():
     """
     if os.path.exists(SAML_CACHE_PATH):
         os.remove(SAML_CACHE_PATH)
-        print('Cache cleaned.')
+        print('Removed the saved OneLogin login.')
 
 
 def parse_saml_time(value):

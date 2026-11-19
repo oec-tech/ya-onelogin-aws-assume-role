@@ -45,7 +45,7 @@ def get_duration():
 
 
 def ask_iteration_new_user():
-    print("\nDo you want to select a new user?  (y/n)")
+    print("\nLog in as another user?  (y/n)")
     answer = get_yes_or_not()
     if answer == 'y':
         return True
@@ -91,6 +91,19 @@ def select_option(title, labels, default=None):
     return get_selection(len(labels))
 
 
+def menu_style():
+    import questionary
+    return questionary.Style([
+        ("qmark", "fg:ansicyan bold"),
+        ("question", "bold"),
+        ("pointer", "fg:ansicyan bold"),
+        ("highlighted", "fg:ansicyan bold"),
+        ("selected", "fg:ansicyan"),
+        ("answer", "fg:ansigreen bold"),
+        ("instruction", "fg:ansibrightblack"),
+    ])
+
+
 def _select_with_menu(title, labels, default):
     import questionary
 
@@ -101,7 +114,9 @@ def _select_with_menu(title, labels, default):
         default=choices[default] if default is not None and 0 <= default < len(choices) else None,
         use_search_filter=True,
         use_jk_keys=False,
-        instruction="(arrow keys to move, type to filter, Enter to select)",
+        instruction="(arrows to move, type to filter, Enter to pick)",
+        style=menu_style(),
+        pointer=">",
     ).ask()
     if answer is None:
         # Ctrl+C
