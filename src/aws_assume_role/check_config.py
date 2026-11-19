@@ -133,9 +133,16 @@ def check_config(options, environ=None, keyring_module=None):
         generated = getattr(options, 'generated_profiles', set()) or set()
         if generated:
             ui.note("%s of these come from the 'generated:' block (olaar --init-profiles)" % len(generated))
-    if selected and selected not in profiles:
+    if selected and selected not in (getattr(options, 'known_profiles', None) or profiles):
         ui.warn("Profile '%s' has no entry under 'profiles:', so the role menu is shown and [%s] is written"
                 % (selected, options.aws_profile or selected))
+        try:
+            from aws_assume_role.aws_assume_role import similar_profiles
+        except ImportError:
+            from aws_assume_role import similar_profiles
+        suggestions = similar_profiles(selected, set(profiles))
+        if suggestions:
+            ui.note("  Did you mean: %s?" % ", ".join("'%s'" % s for s in suggestions))
     for level, message in problems:
         getattr(ui, level)(message)
 
