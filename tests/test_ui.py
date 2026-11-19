@@ -76,7 +76,7 @@ class PickRoleTest(unittest.TestCase):
         picked, select = self._pick(_options(role='Dev'), [1, 2], last_index=0)
 
         self.assertEqual(picked, 2)
-        self.assertEqual(select.call_args_list[1][0], ('Select the AWS role', LABELS, 0))
+        self.assertEqual(select.call_args_list[1][0], ('Select the AWS role (all roles)', LABELS, 0))
 
     def test_full_list_without_settings(self):
         picked, select = self._pick(_options(), [3], last_index=2)

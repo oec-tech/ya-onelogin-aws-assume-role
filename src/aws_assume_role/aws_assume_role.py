@@ -135,12 +135,14 @@ def pick_role(selection_info, labels, options, last_index):
     title = "Select the AWS role"
     related = related_roles(selection_info, options)
     if related and len(related) < len(selection_info):
-        short_labels = [labels[index] for index in related]
+        # Every row here matches, so the match marks would only be noise
+        short_labels = [labels[index].rstrip(" *") for index in related]
         short_labels.append("Show all %s roles..." % len(selection_info))
         default = related.index(last_index) if last_index in related else 0
         picked = select_option(title, short_labels, default)
         if picked < len(related):
             return related[picked]
+        title = "Select the AWS role (all roles)"
     return select_option(title, labels, last_index)
 
 
@@ -180,9 +182,16 @@ def describe_expiration(expiration, now=None):
     "14:30 (in 1h 0m)".
     """
     now = now or datetime.now(timezone.utc)
-    minutes = max(int((expiration - now).total_seconds() // 60), 0)
+    minutes = max(int(round((expiration - now).total_seconds() / 60)), 0)
     left = "%sh %sm" % divmod(minutes, 60) if minutes >= 60 else "%sm" % minutes
     return "%s (in %s)" % (expiration.astimezone().strftime('%Y-%m-%d %H:%M'), left)
+
+
+def shorten_home(path):
+    home = os.path.expanduser('~')
+    if path.startswith(home + os.sep):
+        return '~' + path[len(home):]
+    return path
 
 
 def credential_rows(aws_session_token, aws_region):
@@ -529,7 +538,7 @@ def assume_role(options):
             save_credentials(config_file_writer, aws_file, profile_name, aws_session_token, aws_region)
 
             rows = credential_rows(aws_session_token, aws_region)
-            rows.append(("Saved to", "profile [%s] in %s" % (profile_name, aws_file)))
+            rows.append(("Saved to", "profile [%s] in %s" % (profile_name, shorten_home(aws_file))))
             ui.summary("AWS credentials saved", rows)
             if profile_name != "default":
                 ui.note("Use it with: aws --profile %s ...  or set AWS_PROFILE=%s" % (profile_name, profile_name))

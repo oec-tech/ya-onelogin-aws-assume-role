@@ -44,7 +44,8 @@ def _line(symbol, style, message):
 def banner(version=None):
     from rich.panel import Panel
     from rich.text import Text
-    title = Text("olaar", style="bold cyan")
+    title = Text()
+    title.append("olaar", style="bold cyan")
     title.append("  OneLogin %s AWS" % _symbol("→", "->"), style="bold")
     if version:
         title.append("  v%s" % version, style="dim")
