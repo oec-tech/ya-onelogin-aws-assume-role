@@ -103,6 +103,33 @@ class CredentialRowsTest(unittest.TestCase):
         self.assertIn('(in 15m)', aws_assume_role.describe_expiration(now + timedelta(minutes=15), now))
 
 
+class ProfileUsageHintsTest(unittest.TestCase):
+    def test_warns_about_old_credentials_in_the_environment(self):
+        hints = aws_assume_role.profile_usage_hints('data', {'AWS_ACCESS_KEY_ID': 'old', 'AWS_SESSION_TOKEN': 'old'},
+                                                    windows=True)
+        text = "\n".join(message for _, message in hints)
+
+        self.assertEqual(hints[0][0], 'warn')
+        self.assertIn('(AWS_ACCESS_KEY_ID, AWS_SESSION_TOKEN)', text)
+        self.assertIn('set AWS_ACCESS_KEY_ID= & set AWS_SESSION_TOKEN=', text)
+        self.assertIn('Remove-Item Env:AWS_ACCESS_KEY_ID, Env:AWS_SESSION_TOKEN', text)
+
+    def test_warns_when_aws_profile_points_elsewhere(self):
+        hints = aws_assume_role.profile_usage_hints('data', {'AWS_PROFILE': 'other'})
+
+        self.assertEqual(hints, [('warn', "AWS_PROFILE is 'other', so `aws` uses that profile, not 'data'."),
+                                 ('note', "  Switch: export AWS_PROFILE=data")])
+
+    def test_explains_how_to_use_a_named_profile(self):
+        hints = aws_assume_role.profile_usage_hints('data', {}, windows=True)
+
+        self.assertEqual(hints[1], ('note', "  aws s3 ls --profile data    or    set AWS_PROFILE=data"))
+
+    def test_nothing_to_say_for_the_default_profile(self):
+        self.assertEqual(aws_assume_role.profile_usage_hints('default', {}), [])
+        self.assertEqual(aws_assume_role.profile_usage_hints('data', {'AWS_PROFILE': 'data'}), [])
+
+
 class PlainFallbackTest(unittest.TestCase):
     def setUp(self):
         patcher = mock.patch.object(prompts, 'menus_available', return_value=False)

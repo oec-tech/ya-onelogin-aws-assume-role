@@ -32,6 +32,46 @@ same command; the examples use the full name.
 
     See [automatic renewal](credential-process.md).
 
+## "The security token included in the request is expired"
+
+When the login succeeded but `aws s3 ls` still says the token expired, the AWS
+CLI is not using the credentials that were just saved. The summary at the end
+of a run names the profile it wrote. Check these, in this order:
+
+1. **Old credentials in the shell.** `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+   and `AWS_SESSION_TOKEN` win over every profile. They are often left over from
+   pasting the printed `set ...` lines earlier. Clear them, or open a new terminal:
+
+    === "cmd"
+
+        ```bat
+        set AWS_ACCESS_KEY_ID=
+        set AWS_SECRET_ACCESS_KEY=
+        set AWS_SESSION_TOKEN=
+        set AWS_SECURITY_TOKEN=
+        ```
+
+    === "PowerShell"
+
+        ```powershell
+        Remove-Item Env:AWS_ACCESS_KEY_ID, Env:AWS_SECRET_ACCESS_KEY, Env:AWS_SESSION_TOKEN, Env:AWS_SECURITY_TOKEN -ErrorAction SilentlyContinue
+        ```
+
+    === "bash/zsh"
+
+        ```sh
+        unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN
+        ```
+
+2. **A different profile.** Without `--profile`, the AWS CLI uses `AWS_PROFILE`,
+   or else `[default]`. With `olaar -p data`, use `aws s3 ls --profile data`, or
+   `set AWS_PROFILE=data` (PowerShell: `$env:AWS_PROFILE="data"`).
+3. **Nothing was saved.** Without `-p` (and without `profile:` in the config),
+   the credentials are only printed for you to paste, and the summary says
+   "Profile: none".
+
+The tool checks 1 and 2 after saving and prints a warning when either applies.
+
 ## Choosing the region
 
 `--aws-region` (or `aws-region:`) sets the AWS region written with the
