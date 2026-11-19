@@ -130,6 +130,14 @@ class ProfileUsageHintsTest(unittest.TestCase):
         self.assertEqual(aws_assume_role.profile_usage_hints('data', {'AWS_PROFILE': 'data'}), [])
 
 
+class CredentialsFileTest(unittest.TestCase):
+    def test_follows_aws_shared_credentials_file(self):
+        self.assertEqual(aws_assume_role.default_credentials_file({'AWS_SHARED_CREDENTIALS_FILE': '/x/creds'}), '/x/creds')
+
+    def test_defaults_to_the_home_folder(self):
+        self.assertEqual(aws_assume_role.default_credentials_file({}), os.path.expanduser('~/.aws/credentials'))
+
+
 class PlainFallbackTest(unittest.TestCase):
     def setUp(self):
         patcher = mock.patch.object(prompts, 'menus_available', return_value=False)

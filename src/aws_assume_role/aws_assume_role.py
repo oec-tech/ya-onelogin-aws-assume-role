@@ -246,6 +246,11 @@ def print_credentials(aws_session_token, aws_region, output=None):
 ENV_CREDENTIALS = ('AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_SECURITY_TOKEN')
 
 
+def default_credentials_file(environ):
+    # The AWS CLI and SDKs read AWS_SHARED_CREDENTIALS_FILE instead of ~/.aws/credentials when it's set
+    return os.path.expanduser(environ.get('AWS_SHARED_CREDENTIALS_FILE') or '~/.aws/credentials')
+
+
 def profile_usage_hints(profile_name, environ, windows=False):
     """
     Returns (level, message) pairs that say how to use the saved profile and
@@ -345,7 +350,7 @@ def assume_role(options):
     profile_name = write_profile or "default"
 
     if options.file is None:
-        aws_file = os.path.expanduser('~/.aws/credentials')
+        aws_file = default_credentials_file(os.environ)
     else:
         aws_file = options.file
 

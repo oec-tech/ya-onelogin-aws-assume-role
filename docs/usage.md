@@ -70,6 +70,14 @@ of a run names the profile it wrote. Check these, in this order:
    the credentials are only printed for you to paste, and the summary says
    "Profile: none".
 
+4. **Another credentials file.** The tool writes to `AWS_SHARED_CREDENTIALS_FILE`
+   when it's set, like the AWS CLI, and to `~/.aws/credentials` otherwise
+   (`-f`/`file:` overrides both).
+
+`aws configure list` (add `--profile NAME` to check one profile) shows which
+profile the AWS CLI picked and where its keys came from: `env` means variables
+in the shell, `shared-credentials-file` means the file this tool writes.
+
 The tool checks 1 and 2 after saving and prints a warning when either applies.
 
 ## Choosing the region
