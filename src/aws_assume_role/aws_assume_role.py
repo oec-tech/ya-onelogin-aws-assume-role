@@ -5,7 +5,6 @@ The onelogin-aws-assume-role command: picks the AWS role from the SAMLResponse,
 assumes it with STS, and prints the credentials or saves them to a profile.
 """
 
-import getpass
 import json
 import os
 import sys
@@ -15,28 +14,32 @@ import botocore.client
 import keyring
 
 from base64 import b64decode
+from datetime import datetime, timezone
 from botocore.exceptions import ClientError
 
 try:
     from aws_assume_role.writer import ConfigFileWriter
-    from aws_assume_role.accounts import process_account_and_role_choices
+    from aws_assume_role.accounts import process_account_and_role_choices, same_account, same_role
     from aws_assume_role.credential_process import credential_process
     from aws_assume_role.login import get_client, get_saml_response
     from aws_assume_role.options import get_options
-    from aws_assume_role.prompts import read_line, get_yes_or_not, get_duration, ask_iteration_new_user, select_option
+    from aws_assume_role.prompts import get_duration, ask_iteration_new_user, select_option
     from aws_assume_role.last_choices import get_last_choice, save_last_choice, index_of
-    from aws_assume_role import prompts
+    from aws_assume_role import prompts, ui
+    from aws_assume_role.version import __version__
     from aws_assume_role.saml import get_attributes, is_valid_saml_assertion, get_data_from_cache, write_data_to_cache, clean_cache
     from aws_assume_role.session import explain_session_length, explain_max_session_duration
 except ImportError:
     from writer import ConfigFileWriter
-    from accounts import process_account_and_role_choices
+    from accounts import process_account_and_role_choices, same_account, same_role
     from credential_process import credential_process
     from login import get_client, get_saml_response
     from options import get_options
-    from prompts import read_line, get_yes_or_not, get_duration, ask_iteration_new_user, select_option
+    from prompts import get_duration, ask_iteration_new_user, select_option
     from last_choices import get_last_choice, save_last_choice, index_of
     import prompts
+    import ui
+    from version import __version__
     from saml import get_attributes, is_valid_saml_assertion, get_data_from_cache, write_data_to_cache, clean_cache
     from session import explain_session_length, explain_max_session_duration
 
@@ -79,24 +82,68 @@ def choose_role(roles, options, onelogin_subdomain, username_or_email, app_id):
         data = roles[0].split(',')
         if data[0] == 'Default' or len(data) < 2 or not data[1]:
             return None
-        print("Unique AWS Role available selected: %s" % roles[0])
+        account_id, role_name = role_parts(roles[0])
+        ui.ok("Role %s in account %s (the only one you have)" % (role_name, account_id))
         return roles[0]
     if not roles:
         return None
 
-    print("")
     by_account, by_role = index_roles(roles, options.role_order)
     selection_info, labels, role_option = process_account_and_role_choices(by_account, by_role, options)
     if role_option is None:
         if options.aws_account_id and options.aws_role_name:
-            print("SAMLResponse from Identity Provider does not contain available AWS Role: %s for AWS Account: %s" % (options.aws_role_name, options.aws_account_id))
+            ui.warn("You don't have the role %s in account %s; pick another one." % (options.aws_role_name, options.aws_account_id))
         last_role = get_last_choice(onelogin_subdomain, username_or_email, app_id, 'role')
-        role_option = select_option("Select the desired AWS Role", labels, index_of(selection_info, last_role))
+        role_option = pick_role(selection_info, labels, options, index_of(selection_info, last_role))
         save_last_choice(onelogin_subdomain, username_or_email, app_id, 'role', selection_info[role_option])
-
-    selected_role = selection_info[role_option]
-    print("Option %s selected, AWS Role: %s" % (role_option, selected_role))
+        selected_role = selection_info[role_option]
+    else:
+        selected_role = selection_info[role_option]
+        account_id, role_name = role_parts(selected_role)
+        ui.ok("Role %s in account %s (from your settings)" % (role_name, account_id))
     return selected_role
+
+
+def role_parts(role_string):
+    """
+    Returns (account id, role name) of a SAML role string.
+    """
+    role_info = role_string.split(",")[0].split(":")
+    return role_info[4], role_info[5].replace("role/", "")
+
+
+def related_roles(selection_info, options):
+    """
+    Returns the indexes of the roles in the account --aws-account-id names or
+    with the role name --aws-role-name names.
+    """
+    if not options.aws_account_id and not options.aws_role_name:
+        return []
+    related = []
+    for index, role_string in enumerate(selection_info):
+        account_id, role_name = role_parts(role_string)
+        if same_account(account_id, options.aws_account_id) or same_role(role_name, options.aws_role_name):
+            related.append(index)
+    return related
+
+
+def pick_role(selection_info, labels, options, last_index):
+    """
+    Asks for the role. When the settings name an account or a role, the menu
+    first lists only the roles that match, plus an entry to show all of them.
+    """
+    title = "Select the AWS role"
+    related = related_roles(selection_info, options)
+    if related and len(related) < len(selection_info):
+        # Every row here matches, so the match marks would only be noise
+        short_labels = [labels[index].rstrip(" *") for index in related]
+        short_labels.append("Show all %s roles..." % len(selection_info))
+        default = related.index(last_index) if last_index in related else 0
+        picked = select_option(title, short_labels, default)
+        if picked < len(related):
+            return related[picked]
+        title = "Select the AWS role (all roles)"
+    return select_option(title, labels, last_index)
 
 
 def get_default_aws_region():
@@ -111,8 +158,7 @@ def get_aws_region(options):
     if options.aws_region:
         return options.aws_region
     default = get_default_aws_region()
-    print("\nAWS Region (" + default + "): ")
-    aws_region = read_line()
+    aws_region = ui.ask_text("AWS region", default)
     if not aws_region or aws_region == "-":
         return default
     return aws_region
@@ -128,6 +174,41 @@ def credential_values(aws_session_token, aws_region):
         'AWS_SECURITY_TOKEN': credentials['SessionToken'],
         'AWS_REGION': aws_region,
     }
+
+
+def describe_expiration(expiration, now=None):
+    """
+    Returns the expiration as local time plus how long is left, e.g.
+    "14:30 (in 1h 0m)".
+    """
+    now = now or datetime.now(timezone.utc)
+    minutes = max(int(round((expiration - now).total_seconds() / 60)), 0)
+    left = "%sh %sm" % divmod(minutes, 60) if minutes >= 60 else "%sm" % minutes
+    return "%s (in %s)" % (expiration.astimezone().strftime('%Y-%m-%d %H:%M'), left)
+
+
+def shorten_home(path):
+    home = os.path.expanduser('~')
+    if path.startswith(home + os.sep):
+        return '~' + path[len(home):]
+    return path
+
+
+def credential_rows(aws_session_token, aws_region):
+    """
+    Returns the (label, value) rows that describe new credentials.
+    """
+    arn = aws_session_token['AssumedRoleUser']['Arn']
+    parts = arn.split(":")
+    rows = []
+    if len(parts) > 5 and "/" in parts[5]:
+        rows.append(("Role", parts[5].split("/")[1]))
+        rows.append(("Account", parts[4]))
+    else:
+        rows.append(("Role", arn))
+    rows.append(("Expires", describe_expiration(aws_session_token['Credentials']['Expiration'])))
+    rows.append(("Region", aws_region))
+    return rows
 
 
 def default_output():
@@ -155,12 +236,8 @@ def print_credentials(aws_session_token, aws_region, output=None):
     if output == 'json':
         print(format_credentials(aws_session_token, aws_region, output))
         return
-    print("\n%s\n" % SEPARATOR)
-    print("Success!\n")
-    print("Assumed Role User: %s\n" % aws_session_token['AssumedRoleUser']['Arn'])
-    print("Temporary AWS Credentials Granted via OneLogin\n")
-    print("Copy/Paste to set these as environment variables\n")
-    print("%s\n" % SEPARATOR)
+    ui.summary("AWS credentials ready", credential_rows(aws_session_token, aws_region))
+    ui.note("Paste these lines into your shell to use them:")
     print(format_credentials(aws_session_token, aws_region, output))
 
 
@@ -192,15 +269,14 @@ def save_password_to_keyring(options, username_or_email, password, keyring_passw
         return
     account = get_keyring_account(options, username_or_email)
     if keyring_password is None and not options.save_password:
-        print("Save the OneLogin password in the system keyring (service '%s', account '%s')?  (y/n)" % (options.keychain_service, account))
-        if get_yes_or_not() != 'y':
+        if not ui.confirm("Save the OneLogin password in the system keyring (service '%s', account '%s')?" % (options.keychain_service, account)):
             return
     try:
         keyring.set_password(options.keychain_service, account, password)
     except Exception as e:
-        print("Unable to save the password in the keyring: %s" % e)
+        ui.warn("Couldn't save the password in the keyring: %s" % e)
         return
-    print("%s the password in the system keyring (service '%s', account '%s')" % (
+    ui.ok("%s the password in the system keyring (service '%s', account '%s')" % (
         "Saved" if keyring_password is None else "Updated", options.keychain_service, account))
 
 
@@ -220,7 +296,7 @@ def assume_role(options):
     the credentials. With --credential-process it returns the
     AssumeRoleWithSAML response instead.
     """
-    print("\nya-onelogin-aws-assume-role: OneLogin AWS Assume Role Tool (unofficial fork)\n")
+    ui.banner(__version__)
 
     client = get_client(options)
 
@@ -272,7 +348,7 @@ def assume_role(options):
             cached_data = get_data_from_cache()
             if cached_data:
                 if is_valid_saml_assertion(b64decode(cached_data['saml_response'])):
-                    print("Found a valid SAML cache for the user %s" % cached_data['username_or_email'])
+                    ui.ok("Reusing the saved OneLogin login of %s" % cached_data['username_or_email'])
                     result = cached_data
 
                     username_or_email = result['username_or_email']
@@ -280,11 +356,9 @@ def assume_role(options):
                     mfa_verify_info = result['mfa_verify_info']
                     app_id = result['app_id']
                 else:
-                    print("The cached SAML expired for the user %s" % cached_data['username_or_email'])
+                    ui.warn("The saved OneLogin login of %s expired" % cached_data['username_or_email'])
                     if i == 0:
-                        print("Reuse rest of the data?  (y/n)")
-                        answer = get_yes_or_not()
-                        if answer == 'y':
+                        if ui.confirm("Reuse its username, subdomain, app and MFA device?"):
                             username_or_email = cached_data['username_or_email']
                             onelogin_subdomain = cached_data['onelogin_subdomain']
                             mfa_verify_info = cached_data['mfa_verify_info']
@@ -295,20 +369,16 @@ def assume_role(options):
         # Allow user set a new profile name when switching from User or Role
         if ask_for_user_again or ask_for_role_again:
             if not (write_profile is None and options.file is None):
-                print("Do you want to set a new profile name?  (y/n)")
-                answer = get_yes_or_not()
-                if answer == 'y':
-                    print("Profile name: ")
-                    profile_name = read_line()
+                if ui.confirm("Save to a different AWS profile?", default=False):
+                    profile_name = ui.ask_text("AWS profile name", profile_name)
 
         missing_onelogin_data = username_or_email is None or password is None or app_id is None or onelogin_subdomain is None
 
         if ask_for_user_again:
-            print("OneLogin Username: ")
-            username_or_email = read_line()
+            username_or_email = ui.ask_text("OneLogin username")
             keyring_password = None
 
-            password = getpass.getpass("\nOneLogin Password: ")
+            password = ui.ask_password()
             ask_for_user_again = False
             ask_for_role_again = True
         elif result is None and missing_onelogin_data:
@@ -317,8 +387,7 @@ def assume_role(options):
                 if options.username:
                     username_or_email = options.username
                 else:
-                    print("OneLogin Username: ")
-                    username_or_email = read_line()
+                    username_or_email = ui.ask_text("OneLogin username")
 
             if password is None:
                 if options.password:
@@ -329,24 +398,24 @@ def assume_role(options):
                         try:
                             password = keyring_password = keyring.get_password(options.keychain_service, keychain_account)
                         except Exception as e:
-                            print("Unable to read the keyring: %s" % e)
+                            ui.warn("Couldn't read the keyring: %s" % e)
                         if password is None:
-                            print("No password saved in the keyring for account / service -> %s / %s" % (keychain_account, options.keychain_service))
+                            ui.note("No password saved in the keyring yet (service '%s', account '%s')" % (options.keychain_service, keychain_account))
+                        else:
+                            ui.ok("Using the password saved in the keyring")
                 if password is None:
-                    password = getpass.getpass("\nOneLogin Password: ")
+                    password = ui.ask_password()
 
             if app_id is None:
                 if options.app_id:
                     app_id = options.app_id
                 else:
-                    print("\nAWS App ID: ")
-                    app_id = read_line()
+                    app_id = ui.ask_text("OneLogin AWS app ID")
 
             if options.subdomain:
                 onelogin_subdomain = options.subdomain
             elif onelogin_subdomain is None:
-                print("\nOnelogin Instance Sub Domain: ")
-                onelogin_subdomain = read_line()
+                onelogin_subdomain = ui.ask_text("OneLogin subdomain (the part before .onelogin.com)")
 
         if result is None:
             result = get_saml_response(client, username_or_email, password, app_id, onelogin_subdomain, ip, mfa_verify_info, cmd_otp,
@@ -373,7 +442,7 @@ def assume_role(options):
 
             attributes = get_attributes(saml_response)
             if ROLE_ATTRIBUTE not in attributes:
-                print("SAMLResponse from Identity Provider does not contain AWS Role info")
+                ui.error("OneLogin didn't return any AWS roles for this user")
                 if ask_iteration_new_user():
                     ask_for_user_again = True
                     result = None
@@ -382,7 +451,7 @@ def assume_role(options):
             else:
                 selected_role = choose_role(attributes[ROLE_ATTRIBUTE], options, onelogin_subdomain, username_or_email, app_id)
                 if selected_role is None:
-                    print("SAMLResponse from Identity Provider does not contain available AWS Role for this user")
+                    ui.error("OneLogin didn't return a usable AWS role for this user")
                     if ask_iteration_new_user():
                         ask_for_user_again = True
                         result = None
@@ -402,18 +471,19 @@ def assume_role(options):
         conn = boto3.client('sts', region_name=aws_region, config=botocore_config)
         try:
             if not role_arn or role_arn == "Default" or not principal_arn:
-                print("Missing/Invalid selected AWS Role or Account")
+                ui.error("The selected AWS role or account is missing or invalid")
                 if ask_iteration_new_user():
                     ask_for_user_again = True
                     result = None
                     iterations = append_iterations(iterations)
                     continue
-            aws_session_token = conn.assume_role_with_saml(
-                RoleArn=role_arn,
-                PrincipalArn=principal_arn,
-                SAMLAssertion=saml_response,
-                DurationSeconds=duration
-            )
+            with ui.waiting("Assuming the AWS role..."):
+                aws_session_token = conn.assume_role_with_saml(
+                    RoleArn=role_arn,
+                    PrincipalArn=principal_arn,
+                    SAMLAssertion=saml_response,
+                    DurationSeconds=duration
+                )
         except ClientError as err:
             if hasattr(err, 'message'):
                 error_msg = err.message
@@ -422,30 +492,30 @@ def assume_role(options):
 
             if 'Token must be redeemed within 5 minutes of issuance' in error_msg or \
                'An error occurred (ExpiredTokenException) when calling the AssumeRoleWithSAML operation' in error_msg:
-                print(error_msg)
-                print("Generating a new SAMLResponse with the data already provided....")
+                ui.warn(error_msg)
+                ui.step("Logging in to OneLogin again with the same details...")
                 result = None
                 iterations = append_iterations(iterations)
                 ask_for_user_again = False
                 ask_for_role_again = False
                 continue
             elif "The requested DurationSeconds exceeds the MaxSessionDuration set for this role." in error_msg:
-                print(error_msg)
-                print(explain_max_session_duration(duration))
-                print("Introduce a new value, to be used on this Role, for DurationSeconds between 900 and 43200. Previously was %s" % duration)
+                ui.error(error_msg)
+                ui.note(explain_max_session_duration(duration))
+                print("Enter a session length in seconds for this role, from 900 to 43200 (it was %s):" % duration)
                 duration = get_duration()
                 iterations = append_iterations(iterations)
                 ask_for_user_again = False
                 ask_for_role_again = False
                 continue
             elif "Not authorized to perform sts:AssumeRoleWithSAML" in error_msg:
-                print(error_msg)
+                ui.error(error_msg)
                 ask_for_user_again = True
                 result = None
                 iterations = append_iterations(iterations)
                 continue
             elif "Request ARN is invalid" in error_msg:
-                print(error_msg)
+                ui.error(error_msg)
                 ask_for_user_again = False
                 ask_for_role_again = True
                 iterations = append_iterations(iterations)
@@ -455,7 +525,7 @@ def assume_role(options):
 
         session_note = explain_session_length(duration, aws_session_token['Credentials']['Expiration'], saml_response)
         if session_note:
-            print(session_note)
+            ui.note(session_note)
 
         if options.credential_process:
             return aws_session_token
@@ -467,22 +537,19 @@ def assume_role(options):
                 config_file_writer = ConfigFileWriter()
             save_credentials(config_file_writer, aws_file, profile_name, aws_session_token, aws_region)
 
-            print("Success!\n")
-            print("Temporary AWS Credentials Granted via OneLogin\n")
-            print("Updated AWS profile '%s' located at %s" % (profile_name, aws_file))
+            rows = credential_rows(aws_session_token, aws_region)
+            rows.append(("Saved to", "profile [%s] in %s" % (profile_name, shorten_home(aws_file))))
+            ui.summary("AWS credentials saved", rows)
+            if profile_name != "default":
+                ui.note("Use it with: aws --profile %s ...  or set AWS_PROFILE=%s" % (profile_name, profile_name))
 
         if options.interactive:
-            print("\n\nThe process regenerated credentials for user %s with AWS Role %s " % (username_or_email, selected_role))
-            print("Do you want to execute now the process for the same user but with other AWS Role?  (y/n)")
-            answer = get_yes_or_not()
-            if answer == 'y':
+            if ui.confirm("Get credentials for another role of %s?" % username_or_email, default=False):
                 ask_for_user_again = False
                 ask_for_role_again = True
                 iterations = append_iterations(iterations)
                 continue
-            print("Do you want to execute now the process for other user?  (y/n)")
-            answer = get_yes_or_not()
-            if answer == 'y':
+            if ui.confirm("Log in as another user?", default=False):
                 ask_for_user_again = True
                 result = None
                 iterations = append_iterations(iterations)
@@ -490,11 +557,11 @@ def assume_role(options):
             break
 
         if i < len(iterations) - 1:
-            print("This process will regenerate credentials %s more times.\n" % (len(iterations) - i - 1))
-            print("Press Ctrl + C to exit")
+            ui.note("Refreshing the credentials %s more time(s), every %s minutes. Press Ctrl+C to stop." % (len(iterations) - i - 1, options.time))
             sleep = True
         else:
-            print("\nExecuted a total of %s iterations" % len(iterations))
+            if len(iterations) > 1:
+                ui.note("Done: refreshed the credentials %s times" % len(iterations))
 
 
 if __name__ == '__main__':

@@ -29,7 +29,7 @@ class SavePasswordToKeyringTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def _save(self, options, password, keyring_password, answer=None):
-        with mock.patch.object(aws_assume_role, 'get_yes_or_not', return_value=answer) as ask, \
+        with mock.patch.object(aws_assume_role.ui, 'confirm', return_value=answer == 'y') as ask, \
                 redirect_stdout(StringIO()):
             aws_assume_role.save_password_to_keyring(options, 'jane@example.com', password, keyring_password)
         return ask

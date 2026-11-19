@@ -84,16 +84,32 @@ def process_account_and_role_choices(info_indexed_by_account, info_indexed_by_ro
     return selection_info, labels, role_option
 
 
+def same_account(account_id, config_account_id):
+    """
+    Compares account ids, also when the configured one lost its leading zeros
+    (an unquoted number in YAML) or has spaces or dashes.
+    """
+    if not config_account_id:
+        return False
+    wanted = str(config_account_id).replace("-", "").strip()
+    if wanted.isdigit() and account_id.isdigit():
+        return int(account_id) == int(wanted)
+    return account_id == wanted
+
+
+def same_role(role_name, config_role_name):
+    # IAM role names are case-insensitive
+    return bool(config_role_name) and role_name.lower() == str(config_role_name).strip().lower()
+
+
 def check_info(account_id, role_name, config_account_id, config_role_name):
     mark = ""
     found = False
-    if account_id == config_account_id and role_name == config_role_name:
+    if same_account(account_id, config_account_id) and same_role(role_name, config_role_name):
         mark = " **"
         found = True
-    elif account_id == config_account_id:
-            mark = " *"
-    elif role_name == config_role_name:
-            mark = " *"
+    elif same_account(account_id, config_account_id) or same_role(role_name, config_role_name):
+        mark = " *"
     return mark, found
 
 

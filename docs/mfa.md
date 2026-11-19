@@ -34,6 +34,13 @@ Each menu starts on the device or role you picked last time, which is
 remembered per user and app in `~/.onelogin/last_choices.json` (only ARNs and
 device ids, nothing secret).
 
+When the settings name an account or a role (`aws-account-id` or
+`aws-role-name`, for example in a `profiles:` entry picked with `-p`) but not a
+role you have, the role menu first lists only the matching roles: those in that
+account, or with that role name. Pick one, or pick **Show all N roles...** at
+the bottom to see every role. When both are set and match a role you have, no
+menu is shown at all.
+
 `--no-menu` (or `menu: false`) brings back numbered lists. They're also used
 automatically when the input or output isn't a terminal.
 
@@ -47,6 +54,7 @@ aws-account-id: "123456789012"
 aws-role-name: DataEngineer
 ```
 
-Put these under `profiles:` to have a different role per profile. Give your
+Put these under `profiles:` to have a different role per profile. Quote the
+account id, so YAML reads it as text and keeps any leading zeros. Give your
 accounts readable names in the `accounts:` section so the menu shows
 `DataEngineer (Account: 123456789012 - Data account)`.
