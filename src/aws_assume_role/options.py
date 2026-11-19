@@ -285,6 +285,28 @@ def find_yaml_config(config, config_file_path):
     return None
 
 
+class UniqueKeyLoader(yaml.SafeLoader):
+    """
+    A YAML loader that rejects a key repeated in one mapping, which plain YAML
+    loading silently resolves by keeping the last one.
+    """
+
+
+def _construct_unique_mapping(loader, node, deep=False):
+    seen = {}
+    for key_node, _ in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in seen:
+            raise yaml.constructor.ConstructorError(
+                "while reading a mapping", node.start_mark,
+                "'%s' appears twice (first on line %s)" % (key, seen[key] + 1), key_node.start_mark)
+        seen[key] = key_node.start_mark.line
+    return loader.construct_mapping(node, deep=deep)
+
+
+UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping)
+
+
 def load_yaml_config(parser, path):
     """
     Reads config.yaml: any command-line option by name, plus 'profiles'
@@ -293,7 +315,7 @@ def load_yaml_config(parser, path):
     """
     try:
         with open(os.path.expanduser(path)) as f:
-            data = yaml.safe_load(f) or {}
+            data = yaml.load(f, Loader=UniqueKeyLoader) or {}
     except OSError as e:
         parser.error("can't read the config file %s: %s" % (path, e.strerror))
     except yaml.YAMLError as e:

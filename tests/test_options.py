@@ -151,6 +151,19 @@ class YamlConfigTest(unittest.TestCase):
             _get_options([], yaml_path=path)
         self.assertIn("unknown setting 'aws_regoin'", stderr.getvalue())
 
+    def test_duplicate_profile_names_are_an_error(self):
+        path = self._write("""
+            profiles:
+              abcd:
+                aws-role-name: MyRole
+              abcd:
+                aws-role-name: MyOtherRole
+        """)
+
+        with redirect_stderr(StringIO()) as stderr, self.assertRaises(SystemExit):
+            _get_options([], yaml_path=path)
+        self.assertIn("'abcd' appears twice (first on line 3)", stderr.getvalue())
+
     def test_wrong_type_is_an_error(self):
         path = self._write("duration: forever\n")
 

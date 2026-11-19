@@ -80,6 +80,27 @@ Now `-p main` and `-p ai` assume different roles, and both write
 whichever you logged in to last. `--aws-profile` on the command line overrides
 it for one run.
 
+!!! warning "Each entry needs its own name"
+    The names under `profiles:` must be unique, even when entries share an
+    account or an `aws-profile`. Plain YAML would quietly keep only the last of
+    two entries with the same name, so the tool stops with an error instead:
+    `'abcd' appears twice (first on line 3)`. For two roles in one account,
+    name the entries after the role and point both at the same `aws-profile`:
+
+    ```yaml
+    profiles:
+      abcd-myrole:
+        aws-account-id: "111111111111"
+        aws-role-name: MyRole
+        aws-profile: abcd
+      abcd-other:
+        aws-account-id: "111111111111"
+        aws-role-name: MyOtherRole
+        aws-profile: abcd
+    ```
+
+    `-p abcd-myrole` or `-p abcd-other` picks the role, and either one writes `[abcd]`.
+
 ## Overlays: one file per account or setup
 
 Keep the shared settings in `config.yaml` and put what differs in overlay files
