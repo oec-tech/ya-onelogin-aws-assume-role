@@ -95,6 +95,9 @@ credentials. Without it, the tool asks, suggesting `$AWS_REGION`,
 - `--cache-saml` keeps the last SAML response in `~/.aws/saml_cache.txt`
   (readable only by you) to switch roles without logging in again while it is
   valid.
+- `--init-profiles` logs in once and writes a profile for every role you have,
+  named after the account aliases (see
+  [Configuration](configuration.md#generate-profiles-for-all-your-roles)).
 - `--role_order` sorts the role menu by role name instead of account id.
 
 ## All options
@@ -175,6 +178,9 @@ options:
                         Authenticator" (matches the name shown in the device list)
   --check-config        Check the config files and show the profiles and settings in effect,
                         without logging in
+  --init-profiles       Log in once, then write a profile for every AWS role you have, named after
+                        the account aliases, to a 'generated:' block of config.yaml. Your own
+                        'profiles:' and 'accounts:' win over it
   --mfa-poll-interval MFA_POLL_INTERVAL
                         Seconds between checks whether a push notification was approved (Default
                         value: 3)

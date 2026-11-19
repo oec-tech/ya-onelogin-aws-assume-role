@@ -490,6 +490,14 @@ def assume_role(options):
                     result = None
                     iterations = append_iterations(iterations)
                     continue
+            elif getattr(options, 'init_profiles', False):
+                try:
+                    from aws_assume_role.init_profiles import init_profiles
+                except ImportError:
+                    from init_profiles import init_profiles
+                init_profiles(attributes[ROLE_ATTRIBUTE], saml_response, options,
+                              options.aws_region or get_default_aws_region())
+                return
             else:
                 selected_role = choose_role(attributes[ROLE_ATTRIBUTE], options, onelogin_subdomain, username_or_email, app_id)
                 if selected_role is None:

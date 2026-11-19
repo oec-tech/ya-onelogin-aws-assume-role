@@ -130,6 +130,9 @@ def check_config(options, environ=None, keyring_module=None):
                  [row if row[0] != selected else (row[0] + " *",) + row[1:] for row in rows])
         if selected:
             ui.note("* used by this run")
+        generated = getattr(options, 'generated_profiles', set()) or set()
+        if generated:
+            ui.note("%s of these come from the 'generated:' block (olaar --init-profiles)" % len(generated))
     if selected and selected not in profiles:
         ui.warn("Profile '%s' has no entry under 'profiles:', so the role menu is shown and [%s] is written"
                 % (selected, options.aws_profile or selected))
