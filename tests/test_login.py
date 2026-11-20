@@ -74,6 +74,54 @@ class WaitForPushTest(unittest.TestCase):
         self.assertIsNone(login.wait_for_push(self.client, 1, 2, 'state', None, 3))
         self.sleep.assert_not_called()
 
+    def _verify_with_errors(self, errors):
+        def verify(*args, **kwargs):
+            if verify.errors:
+                error = verify.errors.pop(0)
+                if isinstance(error, Exception):
+                    raise error
+                self.client.error = error
+                return None
+            self.client.error = None
+            return _response('success')
+        verify.errors = list(errors)
+        return verify
+
+    def test_keeps_checking_through_network_and_server_errors(self):
+        self.client.get_saml_assertion_verifying.side_effect = self._verify_with_errors(
+            [ConnectionError("reset"), '502', '503'])
+
+        result = login.wait_for_push(self.client, 1, 2, 'state', _response('pending'), 3)
+
+        self.assertEqual(result.type, 'success')
+        self.assertEqual(self.sleep.call_count, 4)
+
+    def test_renews_an_expired_api_token(self):
+        self.client.get_saml_assertion_verifying.side_effect = self._verify_with_errors(['401'])
+
+        result = login.wait_for_push(self.client, 1, 2, 'state', _response('pending'), 3)
+
+        self.assertEqual(result.type, 'success')
+        self.client.get_access_token.assert_called_once_with()
+
+    def test_stops_when_asked(self):
+        import threading
+        stop = threading.Event()
+        stop.set()
+
+        result = login.wait_for_push(self.client, 1, 2, 'state', _response('pending'), 3, stop)
+
+        self.assertEqual(result.type, 'pending')
+        self.client.get_saml_assertion_verifying.assert_not_called()
+
+    def test_without_a_terminal_only_waits_for_the_push(self):
+        self.client.get_saml_assertion_verifying.side_effect = [_response('success')]
+        with mock.patch.object(login.prompts, 'menus_available', return_value=False), \
+                mock.patch('sys.stdout', new_callable=lambda: __import__('io').StringIO()):
+            pushed, code = login.wait_for_push_or_code(self.client, 1, 2, 'state', _response('pending'), 3)
+
+        self.assertEqual((pushed.type, code), ('success', None))
+
     def test_gives_up_after_the_timeout(self):
         self.client.get_saml_assertion_verifying.return_value = _response('pending')
 

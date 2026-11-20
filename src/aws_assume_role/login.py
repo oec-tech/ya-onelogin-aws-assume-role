@@ -11,8 +11,9 @@ try:
     from aws_assume_role.onelogin_client import OneLoginClient
     from aws_assume_role.prompts import select_option
     from aws_assume_role.last_choices import get_last_choice, save_last_choice, index_of
-    from aws_assume_role import ui
+    from aws_assume_role import prompts, ui
 except ImportError:
+    import prompts
     from onelogin_client import OneLoginClient
     from prompts import select_option
     from last_choices import get_last_choice, save_last_choice, index_of
@@ -89,24 +90,125 @@ def find_device(devices, name):
     return None
 
 
-def wait_for_push(client, app_id, device_id, state_token, response, poll_interval):
+def _debug(message):
+    # OLAAR_DEBUG=1 shows each push check, to tell a lost approval from a slow one
+    if os.environ.get('OLAAR_DEBUG'):
+        print("[debug] %s" % message, file=sys.stderr, flush=True)
+
+
+def _describe(response, client):
+    if response is not None:
+        return "%s (%s)" % (getattr(response, 'type', None), getattr(response, 'message', ''))
+    return "error %s %s" % (getattr(client, 'error', None), getattr(client, 'error_description', None))
+
+
+def _check_push(client, app_id, device_id, state_token):
+    try:
+        response = client.get_saml_assertion_verifying(app_id, device_id, state_token, None, do_not_notify=True)
+    except Exception as error:
+        # A dropped connection or a timeout: try again on the next check
+        client.error, client.error_description = 'network', str(error)
+        response = None
+    _debug("push check: %s" % _describe(response, client))
+    return response
+
+
+def wait_for_push(client, app_id, device_id, state_token, response, poll_interval, stop=None):
     """
     Checks every poll_interval seconds whether the push notification was
-    approved, for up to PUSH_TIMEOUT seconds, backing off while OneLogin
-    rate-limits the checks. Returns the last response.
+    approved, for up to PUSH_TIMEOUT seconds or until stop is set. Backs off
+    while OneLogin rate-limits the checks, renews an expired API token, and
+    keeps going through network errors and server errors. Returns the last
+    response, or None after an error that checking again won't fix.
     """
     interval = poll_interval
     deadline = time.monotonic() + PUSH_TIMEOUT
     while time.monotonic() < deadline:
-        if response is not None and response.type != "pending":
-            break
-        if response is None:
-            if client.error != '429':
+        if response is not None:
+            if response.type != "pending":
                 break
+            interval = poll_interval
+        elif client.error == '429':
             interval = min(interval * 2, MAX_MFA_POLL_INTERVAL)
-        time.sleep(interval)
-        response = client.get_saml_assertion_verifying(app_id, device_id, state_token, None, do_not_notify=True)
+        elif client.error == '401':
+            # The API access token expired while waiting
+            client.get_access_token()
+        elif client.error not in ('network',) and not str(client.error).startswith('5'):
+            break
+        if stop is not None:
+            if stop.wait(interval):
+                break
+        else:
+            time.sleep(interval)
+        response = _check_push(client, app_id, device_id, state_token)
     return response
+
+
+PUSH_DONE = object()
+PUSH_EXPIRED = object()
+
+
+def wait_for_push_or_code(client, app_id, device_id, state_token, response, poll_interval):
+    """
+    Waits for the push approval while also accepting the code from the app,
+    whichever comes first. Returns (response, code): the push response when
+    it was approved, or the code that was typed (or None for neither).
+    Without a terminal it only waits for the push.
+    """
+    try:
+        if not prompts.menus_available():
+            raise ImportError
+        import copy
+        import threading
+        import questionary
+    except ImportError:
+        with ui.waiting("Approve the push notification in OneLogin Protect..."):
+            return wait_for_push(client, app_id, device_id, state_token, response, poll_interval), None
+
+    question = questionary.text("Approve the push in OneLogin Protect, or type the code from the app:",
+                                style=prompts.menu_style(), qmark="?",
+                                validate=lambda text: bool(text.strip()) or "Type the code, or approve the push")
+    app = question.application
+    stop = threading.Event()
+    result = {}
+    # Its own copy of the client, so the checks don't touch the error state of the main one
+    poller = copy.copy(client)
+
+    def notify(callback):
+        loop = getattr(app, 'loop', None)
+        for _ in range(50):
+            if loop is not None and app.is_running:
+                break
+            time.sleep(0.1)
+            loop = getattr(app, 'loop', None)
+        if loop is not None and app.is_running and not stop.is_set():
+            loop.call_soon_threadsafe(callback)
+
+    def watch():
+        result['response'] = wait_for_push(poller, app_id, device_id, state_token, response, poll_interval, stop)
+        if stop.is_set():
+            return
+        if result['response'] is not None and result['response'].type == 'success':
+            notify(lambda: app.exit(result=PUSH_DONE))
+        else:
+            # Waited too long: close the question so the caller can offer a new push
+            # (unless a code is being typed: then let it be finished)
+            notify(lambda: None if app.current_buffer.text.strip() else app.exit(result=PUSH_EXPIRED))
+
+    thread = threading.Thread(target=watch, daemon=True)
+    thread.start()
+    try:
+        answer = question.unsafe_ask()
+    except KeyboardInterrupt:
+        stop.set()
+        sys.exit(1)
+    stop.set()
+    pushed = result.get('response')
+    if answer is PUSH_DONE or (pushed is not None and pushed.type == 'success'):
+        return pushed, None
+    if answer is PUSH_EXPIRED:
+        return pushed, None
+    return None, answer.strip()
 
 
 def check_device_exists(devices, device_id):
@@ -216,17 +318,26 @@ def get_saml_response(client, username_or_email, password, app_id, onelogin_subd
                     saml_endpoint_response = client.get_saml_assertion_verifying(app_id, device_id, state_token, None, do_not_notify=True)
                     ui.step("Sent a code by SMS")
                 elif device_type == "OneLogin Protect":
-                    # Trigger PUSH and try verify
-                    if 'otp_token' not in mfa_verify_info:
-                        saml_endpoint_response = client.get_saml_assertion_verifying(app_id, device_id, state_token, None, do_not_notify=False)
-                    with ui.waiting("Approve the push notification in OneLogin Protect..."):
-                        saml_endpoint_response = wait_for_push(client, app_id, device_id, state_token,
+                    # Send the push (also when a code was used last time: codes are single-use)
+                    saml_endpoint_response = client.get_saml_assertion_verifying(app_id, device_id, state_token, None, do_not_notify=False)
+                    _debug("push sent: %s" % _describe(saml_endpoint_response, client))
+                    pushed, typed_code = wait_for_push_or_code(client, app_id, device_id, state_token,
                                                                saml_endpoint_response, poll_interval)
 
-                    if saml_endpoint_response and saml_endpoint_response.type == 'success':
+                    if pushed is not None and pushed.type == 'success':
+                        saml_endpoint_response = pushed
                         verified_with_push = True
+                        ui.ok("Push approved")
+                    elif typed_code:
+                        cmd_otp = typed_code
                     else:
-                        ui.warn("The push wasn't approved in time; enter the code from the app instead")
+                        ui.warn("The push took too long: OneLogin didn't report an approval in %s seconds"
+                                % PUSH_TIMEOUT)
+                        if ui.confirm("Send a new push?"):
+                            # Start over with a fresh login, which also brings a fresh state token
+                            return get_saml_response(client, username_or_email, password, app_id, onelogin_subdomain,
+                                                     ip, {'device_id': device_id, 'device_type': device_type},
+                                                     mfa_device=mfa_device, poll_interval=poll_interval)
 
                 if not verified_with_push:
                     if cmd_otp:
